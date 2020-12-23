@@ -44,7 +44,7 @@ func Test(t *testing.T) {
 			}, {
 				Subject:   "c.1",
 				Predicate: "friend",
-				ObjectId:  "2",
+				ObjectId:  "c.2",
 			}, {
 				Subject:   "1000",
 				Predicate: "name",
