@@ -187,15 +187,23 @@ type Quad struct {
 (subject:"_:dg.3267536919.1" predicate:"friend" object_id:"_:dg.3267536919.2" ),
 */
 
+var counter = 0
+
+func getNextBlank() string {
+	counter++
+	return fmt.Sprintf("c.%d", counter)
+}
+
 type object struct {
-	uid string
+	uid   string
+	id    string
+	quads uint64
 }
 
 type walk struct {
-	objects []*object
-
 	curr       *Quad
 	quads      []*Quad
+	objects    []*object
 	openValue  bool
 	openObject bool
 	openArray  bool
@@ -204,9 +212,9 @@ type walk struct {
 
 func newWalk() *walk {
 	return &walk{
-		objects: make([]*object, 0),
-		quads:   make([]*Quad, 0),
 		curr:    &Quad{},
+		quads:   make([]*Quad, 0),
+		objects: make([]*object, 0),
 	}
 }
 
@@ -225,10 +233,10 @@ func (w *walk) lookingForVal() bool {
 
 func (w *walk) foundVal() {
 	w.openValue = false
-	if len(w.objects) > 0 {
-		if uid := w.objects[len(w.objects)-1].uid; uid != "" {
-			w.curr.Subject = uid
-		}
+	object := w.objects[len(w.objects)-1]
+	object.quads++
+	if object.uid != "" {
+		w.curr.Subject = object.uid
 	}
 	w.quads = append(w.quads, w.curr)
 	w.curr = &Quad{}
@@ -272,18 +280,8 @@ func (w *walk) foundUidVal(v string) {
 }
 
 func (w *walk) foundEmptyObject() {
+	w.openValue = false
 	w.curr = &Quad{}
-}
-
-func (w *walk) String() string {
-	o := ""
-	for i := range w.objects {
-		o += fmt.Sprintf("'%s', ", w.objects[i].uid)
-	}
-	if len(o) == 0 {
-		return ""
-	}
-	return o[:len(o)-2]
 }
 
 func Parse(d []byte) ([]*Quad, error) {
@@ -362,25 +360,28 @@ func Parse(d []byte) ([]*Quad, error) {
 				walk.foundEmptyObject()
 			} else {
 				walk.openObject = true
-				walk.objects = append(walk.objects, &object{})
+				walk.objects = append(walk.objects, &object{id: getNextBlank()})
 			}
 
 		case simdjson.TagObjectEnd:
 			if walk.openObject {
 				walk.openObject = false
+				object := walk.objects[len(walk.objects)-1]
+				if object.uid == "" {
+					for i := uint64(0); i < object.quads; i++ {
+						walk.quads[uint64(len(walk.quads))-1-i].Subject = object.id
+					}
+				}
 				walk.objects = walk.objects[:len(walk.objects)-1]
 			}
 
 		case simdjson.TagArrayStart:
 		case simdjson.TagArrayEnd:
-
 		case simdjson.TagNull:
 		case simdjson.TagRoot:
 		case simdjson.TagEnd:
 			return walk.quads, nil
 		}
-
-		fmt.Println(tag, walk)
 	}
 	return walk.quads, nil
 }
