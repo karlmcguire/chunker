@@ -198,6 +198,7 @@ type object struct {
 	uid   string
 	id    string
 	quads uint64
+	last  *Quad
 }
 
 type walk struct {
@@ -360,7 +361,15 @@ func Parse(d []byte) ([]*Quad, error) {
 				walk.foundEmptyObject()
 			} else {
 				walk.openObject = true
-				walk.objects = append(walk.objects, &object{id: getNextBlank()})
+				// TODO: fix
+				var last *Quad
+				if len(walk.quads) > 0 {
+					last = walk.quads[len(walk.quads)-1]
+				}
+				walk.objects = append(walk.objects, &object{
+					id:   getNextBlank(),
+					last: last,
+				})
 			}
 
 		case simdjson.TagObjectEnd:
@@ -371,6 +380,10 @@ func Parse(d []byte) ([]*Quad, error) {
 					for i := uint64(0); i < object.quads; i++ {
 						walk.quads[uint64(len(walk.quads))-1-i].Subject = object.id
 					}
+				} else {
+					// TODO: replace ObjectId for predicates referencing the
+					//       current object
+					object.last.ObjectId = object.uid
 				}
 				walk.objects = walk.objects[:len(walk.objects)-1]
 			}
