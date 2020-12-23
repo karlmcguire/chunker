@@ -223,32 +223,35 @@ func (w *walk) lookingForVal() bool {
 	return w.openValue
 }
 
-func (w *walk) foundValString(v string) {
+func (w *walk) foundVal() {
 	w.openValue = false
-	w.curr.ObjectVal = v
+	if len(w.objects) > 0 {
+		if uid := w.objects[len(w.objects)-1].uid; uid != "" {
+			w.curr.Subject = uid
+		}
+	}
 	w.quads = append(w.quads, w.curr)
 	w.curr = &Quad{}
+}
+
+func (w *walk) foundValString(v string) {
+	w.curr.ObjectVal = v
+	w.foundVal()
 }
 
 func (w *walk) foundValInt(v int64) {
-	w.openValue = false
 	w.curr.ObjectVal = v
-	w.quads = append(w.quads, w.curr)
-	w.curr = &Quad{}
+	w.foundVal()
 }
 
 func (w *walk) foundValFloat(v float64) {
-	w.openValue = false
 	w.curr.ObjectVal = v
-	w.quads = append(w.quads, w.curr)
-	w.curr = &Quad{}
+	w.foundVal()
 }
 
 func (w *walk) foundValBool(v bool) {
-	w.openValue = false
 	w.curr.ObjectVal = v
-	w.quads = append(w.quads, w.curr)
-	w.curr = &Quad{}
+	w.foundVal()
 }
 
 func (w *walk) lookingForUid() bool {
