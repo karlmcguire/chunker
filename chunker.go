@@ -6,6 +6,13 @@ import (
 	json "github.com/minio/simdjson-go"
 )
 
+type Quad struct {
+	Subject   string
+	Predicate string
+	ObjectId  string
+	ObjectVal interface{}
+}
+
 var subjectCounter uint64
 
 func getNextBlank() string {
@@ -25,28 +32,39 @@ const (
 
 type Level struct {
 	Type Status
-	Uid  string
+	Uid  []string
+}
+
+func (l *Level) Top() string {
+	if len(l.Uid) == 0 {
+		return ""
+	}
+	return l.Uid[len(l.Uid)-1]
 }
 
 type Walk struct {
-	Status Status
-	Quad   *Quad
-	Quads  []*Quad
-	Level  []*Level
-	Skip   bool
+	Status     Status
+	Quad       *Quad
+	Quads      []*Quad
+	Level      []*Level
+	Skip       bool
+	WaitArray  []*Quad
+	WaitObject []*Quad
 }
 
 func NewWalk() *Walk {
 	return &Walk{
-		Status: OBJECT,
-		Quad:   &Quad{},
-		Quads:  make([]*Quad, 0),
-		Level:  make([]*Level, 0),
+		Status:     OBJECT,
+		Quad:       &Quad{},
+		Quads:      make([]*Quad, 0),
+		Level:      make([]*Level, 0),
+		WaitArray:  make([]*Quad, 0),
+		WaitObject: make([]*Quad, 0),
 	}
 }
 
 func (w *Walk) Push() {
-	w.Quad.Subject = w.Level[len(w.Level)-1].Uid
+	w.Quad.Subject = w.Level[len(w.Level)-1].Top()
 	w.Quads = append(w.Quads, w.Quad)
 	w.Quad = &Quad{}
 }
@@ -64,8 +82,18 @@ func (w *Walk) Read(i json.Iter, t, n json.Tag) bool {
 			w.Quad.Predicate, _ = i.String()
 			switch n {
 			case json.TagObjectStart:
+				if len(w.Level) > 0 {
+					w.Quad.Subject = w.Level[len(w.Level)-1].Top()
+				}
+				w.WaitObject = append(w.WaitObject, w.Quad)
+				w.Quad = &Quad{}
 				w.Status = OBJECT
 			case json.TagArrayStart:
+				if len(w.Level) > 0 {
+					w.Quad.Subject = w.Level[len(w.Level)-1].Top()
+				}
+				w.WaitArray = append(w.WaitArray, w.Quad)
+				w.Quad = &Quad{}
 				w.Status = ARRAY
 			default:
 				if w.Quad.Predicate == "uid" {
@@ -79,7 +107,8 @@ func (w *Walk) Read(i json.Iter, t, n json.Tag) bool {
 			w.Push()
 			w.Status = PREDICATE
 		case UID:
-			w.Level[len(w.Level)-1].Uid, _ = i.String()
+			s, _ := i.String()
+			w.Level[len(w.Level)-1].Uid = append(w.Level[len(w.Level)-1].Uid, s)
 			w.Quad = &Quad{}
 			w.Status = PREDICATE
 		}
@@ -115,13 +144,10 @@ func (w *Walk) Read(i json.Iter, t, n json.Tag) bool {
 		}
 
 	case json.TagObjectStart:
-		// TODO: subjects
-		//
-		// some way to set subject per depth
 		if n != json.TagObjectEnd {
 			w.Level = append(w.Level, &Level{
 				Type: OBJECT,
-				Uid:  getNextBlank(),
+				Uid:  []string{getNextBlank()},
 			})
 		}
 		switch n {
@@ -144,13 +170,14 @@ func (w *Walk) Read(i json.Iter, t, n json.Tag) bool {
 		case json.TagObjectEnd:
 			w.Status = PREDICATE
 			w.Skip = true
+			w.WaitObject = w.WaitObject[:len(w.WaitObject)-1]
 		}
 
 	case json.TagArrayStart:
 		if n != json.TagArrayEnd {
 			w.Level = append(w.Level, &Level{
 				Type: ARRAY,
-				// TODO: not sure if i should do getNextBlank() for arrays?
+				Uid:  make([]string, 0),
 			})
 		}
 		switch n {
@@ -173,9 +200,17 @@ func (w *Walk) Read(i json.Iter, t, n json.Tag) bool {
 		case json.TagArrayEnd:
 			w.Status = PREDICATE
 			w.Skip = true
+			w.WaitArray = w.WaitArray[:len(w.WaitArray)-1]
 		}
 
 	case json.TagObjectEnd:
+		// TODO: check this
+		if len(w.WaitObject) > 0 {
+			wait := w.WaitObject[len(w.WaitObject)-1]
+			wait.ObjectId = w.Level[len(w.Level)-1].Top()
+			w.Quads = append(w.Quads, wait)
+			w.WaitObject = w.WaitObject[:len(w.WaitObject)-1]
+		}
 		w.Level = w.Level[:len(w.Level)-1]
 		switch n {
 		case json.TagObjectStart:
@@ -185,6 +220,16 @@ func (w *Walk) Read(i json.Iter, t, n json.Tag) bool {
 		}
 
 	case json.TagArrayEnd:
+		if len(w.WaitArray) > 0 {
+			wait := w.WaitArray[len(w.WaitArray)-1]
+			quad := &Quad{
+				Subject:   wait.Subject,
+				Predicate: wait.Predicate,
+				ObjectId:  w.Level[len(w.Level)-1].Top(),
+			}
+			w.Quads = append(w.Quads, quad)
+			w.WaitArray = w.WaitArray[:len(w.WaitArray)-1]
+		}
 		w.Level = w.Level[:len(w.Level)-1]
 		switch n {
 		case json.TagArrayStart:
@@ -207,20 +252,13 @@ func (w *Walk) Read(i json.Iter, t, n json.Tag) bool {
 		return true
 	}
 
-	tl := &Level{}
-	l := len(w.Level)
+	tl := &Quad{}
+	l := len(w.WaitArray)
 	if l != 0 {
-		tl = w.Level[l-1]
+		tl = w.WaitArray[l-1]
 	}
-	fmt.Println(t, n, l, tl, w.Status)
+	fmt.Println(t, n, len(w.Level), tl, w.Status)
 	return false
-}
-
-type Quad struct {
-	Subject   string
-	Predicate string
-	ObjectId  string
-	ObjectVal interface{}
 }
 
 func Parse(d []byte) ([]*Quad, error) {
