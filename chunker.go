@@ -20,6 +20,8 @@ type Walk struct {
 	Status Status
 	Quad   *Quad
 	Quads  []*Quad
+	Skip   bool
+	Depth  []string
 }
 
 func NewWalk() *Walk {
@@ -27,6 +29,7 @@ func NewWalk() *Walk {
 		Status: NONE,
 		Quad:   &Quad{},
 		Quads:  make([]*Quad, 0),
+		Depth:  make([]string, 0),
 	}
 }
 
@@ -36,10 +39,14 @@ func (w *Walk) Push() {
 }
 
 func (w *Walk) Read(i json.Iter, t, n json.Tag) bool {
+	if w.Skip {
+		w.Skip = false
+		return false
+	}
+
 	switch t {
 	case json.TagString:
 		switch w.Status {
-
 		case PREDICATE:
 			w.Quad.Predicate, _ = i.String()
 			switch n {
@@ -50,16 +57,10 @@ func (w *Walk) Read(i json.Iter, t, n json.Tag) bool {
 			default:
 				w.Status = SCALAR
 			}
-
 		case SCALAR:
 			w.Quad.ObjectVal, _ = i.String()
 			w.Push()
 			w.Status = PREDICATE
-
-		case OBJECT:
-			fmt.Println("why does this happen?")
-		case ARRAY:
-			fmt.Println("shouldn't happen (array)")
 		}
 
 	case json.TagInteger:
@@ -93,6 +94,9 @@ func (w *Walk) Read(i json.Iter, t, n json.Tag) bool {
 		}
 
 	case json.TagObjectStart:
+		if n != json.TagObjectEnd {
+			w.Depth = append(w.Depth, "{")
+		}
 		switch n {
 		case json.TagString:
 			fallthrough
@@ -112,17 +116,13 @@ func (w *Walk) Read(i json.Iter, t, n json.Tag) bool {
 			w.Status = ARRAY
 		case json.TagObjectEnd:
 			w.Status = PREDICATE
-		case json.TagArrayEnd:
-			fallthrough
-		case json.TagNull:
-			fallthrough
-		case json.TagRoot:
-			fallthrough
-		case json.TagEnd:
-			// TODO: should never happen, would be invalid json
+			w.Skip = true
 		}
 
 	case json.TagArrayStart:
+		if n != json.TagArrayEnd {
+			w.Depth = append(w.Depth, "[")
+		}
 		switch n {
 		case json.TagString:
 			fallthrough
@@ -142,17 +142,11 @@ func (w *Walk) Read(i json.Iter, t, n json.Tag) bool {
 			w.Status = ARRAY
 		case json.TagArrayEnd:
 			w.Status = PREDICATE
-		case json.TagObjectEnd:
-			fallthrough
-		case json.TagNull:
-			fallthrough
-		case json.TagRoot:
-			fallthrough
-		case json.TagEnd:
-			// TODO: should never happen, would be invalid json
+			w.Skip = true
 		}
 
 	case json.TagObjectEnd:
+		w.Depth = w.Depth[:len(w.Depth)-1]
 		switch n {
 		case json.TagObjectStart:
 			w.Status = OBJECT
@@ -161,6 +155,7 @@ func (w *Walk) Read(i json.Iter, t, n json.Tag) bool {
 		}
 
 	case json.TagArrayEnd:
+		w.Depth = w.Depth[:len(w.Depth)-1]
 		switch n {
 		case json.TagArrayStart:
 			w.Status = ARRAY
@@ -178,10 +173,10 @@ func (w *Walk) Read(i json.Iter, t, n json.Tag) bool {
 		}
 
 	case json.TagEnd:
-		fmt.Println(t, n, w.Status)
+		fmt.Println(t, n, w.Depth, w.Status)
 		return true
 	}
-	fmt.Println(t, n, w.Status)
+	fmt.Println(t, n, w.Depth, w.Status)
 	return false
 }
 
