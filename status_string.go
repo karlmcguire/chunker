@@ -12,12 +12,12 @@ func _() {
 	_ = x[SCALAR-1]
 	_ = x[OBJECT-2]
 	_ = x[ARRAY-3]
-	_ = x[NONE-4]
+	_ = x[UID-4]
 }
 
-const _Status_name = "PREDICATESCALAROBJECTARRAYNONE"
+const _Status_name = "PREDICATESCALAROBJECTARRAYUID"
 
-var _Status_index = [...]uint8{0, 9, 15, 21, 26, 30}
+var _Status_index = [...]uint8{0, 9, 15, 21, 26, 29}
 
 func (i Status) String() string {
 	if i >= Status(len(_Status_index)-1) {

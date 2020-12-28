@@ -6,6 +6,13 @@ import (
 	json "github.com/minio/simdjson-go"
 )
 
+var subjectCounter uint64
+
+func getNextBlank() string {
+	subjectCounter++
+	return fmt.Sprintf("c.%d", subjectCounter)
+}
+
 type Status uint8
 
 const (
@@ -13,27 +20,33 @@ const (
 	SCALAR
 	OBJECT
 	ARRAY
-	NONE
+	UID
 )
+
+type Level struct {
+	Type Status
+	Uid  string
+}
 
 type Walk struct {
 	Status Status
 	Quad   *Quad
 	Quads  []*Quad
+	Level  []*Level
 	Skip   bool
-	Depth  []string
 }
 
 func NewWalk() *Walk {
 	return &Walk{
-		Status: NONE,
+		Status: OBJECT,
 		Quad:   &Quad{},
 		Quads:  make([]*Quad, 0),
-		Depth:  make([]string, 0),
+		Level:  make([]*Level, 0),
 	}
 }
 
 func (w *Walk) Push() {
+	w.Quad.Subject = w.Level[len(w.Level)-1].Uid
 	w.Quads = append(w.Quads, w.Quad)
 	w.Quad = &Quad{}
 }
@@ -55,11 +68,19 @@ func (w *Walk) Read(i json.Iter, t, n json.Tag) bool {
 			case json.TagArrayStart:
 				w.Status = ARRAY
 			default:
-				w.Status = SCALAR
+				if w.Quad.Predicate == "uid" {
+					w.Status = UID
+				} else {
+					w.Status = SCALAR
+				}
 			}
 		case SCALAR:
 			w.Quad.ObjectVal, _ = i.String()
 			w.Push()
+			w.Status = PREDICATE
+		case UID:
+			w.Level[len(w.Level)-1].Uid, _ = i.String()
+			w.Quad = &Quad{}
 			w.Status = PREDICATE
 		}
 
@@ -94,8 +115,14 @@ func (w *Walk) Read(i json.Iter, t, n json.Tag) bool {
 		}
 
 	case json.TagObjectStart:
+		// TODO: subjects
+		//
+		// some way to set subject per depth
 		if n != json.TagObjectEnd {
-			w.Depth = append(w.Depth, "{")
+			w.Level = append(w.Level, &Level{
+				Type: OBJECT,
+				Uid:  getNextBlank(),
+			})
 		}
 		switch n {
 		case json.TagString:
@@ -121,7 +148,10 @@ func (w *Walk) Read(i json.Iter, t, n json.Tag) bool {
 
 	case json.TagArrayStart:
 		if n != json.TagArrayEnd {
-			w.Depth = append(w.Depth, "[")
+			w.Level = append(w.Level, &Level{
+				Type: ARRAY,
+				// TODO: not sure if i should do getNextBlank() for arrays?
+			})
 		}
 		switch n {
 		case json.TagString:
@@ -146,7 +176,7 @@ func (w *Walk) Read(i json.Iter, t, n json.Tag) bool {
 		}
 
 	case json.TagObjectEnd:
-		w.Depth = w.Depth[:len(w.Depth)-1]
+		w.Level = w.Level[:len(w.Level)-1]
 		switch n {
 		case json.TagObjectStart:
 			w.Status = OBJECT
@@ -155,7 +185,7 @@ func (w *Walk) Read(i json.Iter, t, n json.Tag) bool {
 		}
 
 	case json.TagArrayEnd:
-		w.Depth = w.Depth[:len(w.Depth)-1]
+		w.Level = w.Level[:len(w.Level)-1]
 		switch n {
 		case json.TagArrayStart:
 			w.Status = ARRAY
@@ -173,10 +203,16 @@ func (w *Walk) Read(i json.Iter, t, n json.Tag) bool {
 		}
 
 	case json.TagEnd:
-		fmt.Println(t, n, w.Depth, w.Status)
+		fmt.Println(t, n, w.Level, w.Status)
 		return true
 	}
-	fmt.Println(t, n, w.Depth, w.Status)
+
+	tl := &Level{}
+	l := len(w.Level)
+	if l != 0 {
+		tl = w.Level[l-1]
+	}
+	fmt.Println(t, n, l, tl, w.Status)
 	return false
 }
 
