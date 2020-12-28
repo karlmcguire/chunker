@@ -6,6 +6,40 @@ import (
 	"github.com/davecgh/go-spew/spew"
 )
 
+/*
+r { OBJECT
+{ " PREDICATE
+" " SCALAR
+" " PREDICATE
+" { OBJECT
+{ } PREDICATE
+} " PREDICATE
+" [ ARRAY
+[ { OBJECT
+{ " PREDICATE
+" " SCALAR
+" " PREDICATE
+" f SCALAR
+f " PREDICATE
+" { OBJECT
+{ } PREDICATE
+} } PREDICATE
+} { OBJECT
+{ " PREDICATE
+" " SCALAR
+" " PREDICATE
+" " SCALAR
+" " PREDICATE
+" { OBJECT
+{ } PREDICATE
+} } PREDICATE
+} ] PREDICATE
+] } PREDICATE
+} r DONE
+r   DONE
+    DONE
+*/
+
 type Case struct {
 	Json string
 	Quad []Quad

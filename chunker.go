@@ -6,40 +6,6 @@ import (
 	json "github.com/minio/simdjson-go"
 )
 
-/*
-r { OBJECT
-{ " PREDICATE
-" " SCALAR
-" " PREDICATE
-" { OBJECT
-{ } PREDICATE
-} " PREDICATE
-" [ ARRAY
-[ { OBJECT
-{ " PREDICATE
-" " SCALAR
-" " PREDICATE
-" f SCALAR
-f " PREDICATE
-" { OBJECT
-{ } PREDICATE
-} } PREDICATE
-} { OBJECT
-{ " PREDICATE
-" " SCALAR
-" " PREDICATE
-" " SCALAR
-" " PREDICATE
-" { OBJECT
-{ } PREDICATE
-} } PREDICATE
-} ] PREDICATE
-] } PREDICATE
-} r DONE
-r   DONE
-    DONE
-*/
-
 type Status uint8
 
 const (
@@ -47,6 +13,7 @@ const (
 	SCALAR
 	OBJECT
 	ARRAY
+	NONE
 )
 
 type Walk struct {
@@ -57,8 +24,9 @@ type Walk struct {
 
 func NewWalk() *Walk {
 	return &Walk{
-		Quad:  &Quad{},
-		Quads: make([]*Quad, 0),
+		Status: NONE,
+		Quad:   &Quad{},
+		Quads:  make([]*Quad, 0),
 	}
 }
 
@@ -68,7 +36,6 @@ func (w *Walk) Push() {
 }
 
 func (w *Walk) Read(i json.Iter, t, n json.Tag) bool {
-	defer fmt.Println(t, n, w.Status)
 	switch t {
 	case json.TagString:
 		switch w.Status {
@@ -90,16 +57,41 @@ func (w *Walk) Read(i json.Iter, t, n json.Tag) bool {
 			w.Status = PREDICATE
 
 		case OBJECT:
-			fmt.Println("shouldn't happen (object)")
+			fmt.Println("why does this happen?")
 		case ARRAY:
 			fmt.Println("shouldn't happen (array)")
 		}
 
 	case json.TagInteger:
+		if w.Status == SCALAR {
+			w.Quad.ObjectVal, _ = i.Int()
+			w.Push()
+			w.Status = PREDICATE
+		}
+
 	case json.TagUint:
+		if w.Status == SCALAR {
+			w.Quad.ObjectVal, _ = i.Int()
+			w.Push()
+			w.Status = PREDICATE
+		}
+
 	case json.TagFloat:
+		if w.Status == SCALAR {
+			w.Quad.ObjectVal, _ = i.Float()
+			w.Push()
+			w.Status = PREDICATE
+		}
+
 	case json.TagBoolTrue:
+		fallthrough
 	case json.TagBoolFalse:
+		if w.Status == SCALAR {
+			w.Quad.ObjectVal, _ = i.Bool()
+			w.Push()
+			w.Status = PREDICATE
+		}
+
 	case json.TagObjectStart:
 		switch n {
 		case json.TagString:
@@ -119,24 +111,77 @@ func (w *Walk) Read(i json.Iter, t, n json.Tag) bool {
 		case json.TagArrayStart:
 			w.Status = ARRAY
 		case json.TagObjectEnd:
-			// TODO: should never happen
+			w.Status = PREDICATE
 		case json.TagArrayEnd:
-			// TODO: should never happen
+			fallthrough
 		case json.TagNull:
-			// TODO: should never happen
+			fallthrough
 		case json.TagRoot:
-			// TODO: should never happen
+			fallthrough
 		case json.TagEnd:
-			// TODO: should never happen
+			// TODO: should never happen, would be invalid json
 		}
-	case json.TagObjectEnd:
+
 	case json.TagArrayStart:
+		switch n {
+		case json.TagString:
+			fallthrough
+		case json.TagInteger:
+			fallthrough
+		case json.TagUint:
+			fallthrough
+		case json.TagFloat:
+			fallthrough
+		case json.TagBoolTrue:
+			fallthrough
+		case json.TagBoolFalse:
+			w.Status = PREDICATE
+		case json.TagObjectStart:
+			w.Status = OBJECT
+		case json.TagArrayStart:
+			w.Status = ARRAY
+		case json.TagArrayEnd:
+			w.Status = PREDICATE
+		case json.TagObjectEnd:
+			fallthrough
+		case json.TagNull:
+			fallthrough
+		case json.TagRoot:
+			fallthrough
+		case json.TagEnd:
+			// TODO: should never happen, would be invalid json
+		}
+
+	case json.TagObjectEnd:
+		switch n {
+		case json.TagObjectStart:
+			w.Status = OBJECT
+		default:
+			w.Status = PREDICATE
+		}
+
 	case json.TagArrayEnd:
+		switch n {
+		case json.TagArrayStart:
+			w.Status = ARRAY
+		default:
+			w.Status = PREDICATE
+		}
+
 	case json.TagNull:
 	case json.TagRoot:
+		switch n {
+		case json.TagObjectStart:
+			w.Status = OBJECT
+		case json.TagArrayStart:
+			w.Status = ARRAY
+		}
+
 	case json.TagEnd:
+		fmt.Println(t, n, w.Status)
 		return true
 	}
+	fmt.Println(t, n, w.Status)
 	return false
 }
 
