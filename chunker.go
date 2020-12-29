@@ -70,6 +70,12 @@ func (w *Walk) Push() {
 	w.Quad = &Quad{}
 }
 
+// TODO: manage WaitObject stack similar to the way WaitArray is already managed
+//       and if anything it should be easier because we don't have to deal with
+//       multiple reference quads like with arrays (if we need to do this,
+//       haven't checked the spec yet)
+//
+// TODO: performance tuning
 func (w *Walk) Read(i json.Iter, t, n json.Tag) bool {
 	if w.Skip {
 		w.Skip = false
