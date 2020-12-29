@@ -81,35 +81,15 @@ func (w *Walk) Read(i json.Iter, t, n json.Tag) bool {
 		//       an array so when we complete an array (below) we can generate
 		//       the quads referencing objects with their uids
 		//
-		// TODO: make sure this won't break anything else, seems to be working
-		//       for now, but it's not pretty
-		if len(w.WaitArray) > 0 {
-			if len(w.Level) >= 2 {
-				curr := w.Level[len(w.Level)-1]
-				under := w.Level[len(w.Level)-2]
-				if under.Type == ARRAY {
-					under.Uid = append(under.Uid, curr.Uid...)
-				}
-			}
+		// do nothing if this is an empty object {}
+		if t == json.TagObjectStart {
+			break
 		}
+
 	case json.TagArrayEnd:
-		if len(w.WaitArray) > 0 {
-			fmt.Println()
-			for _, l := range w.Level {
-				fmt.Println(l)
-			}
-			fmt.Println()
-			wait := w.WaitArray[len(w.WaitArray)-1]
-			uids := w.Level[len(w.Level)-1].Uid
-			for _, uid := range uids {
-				quad := &Quad{
-					Subject:   wait.Subject,
-					Predicate: wait.Predicate,
-					ObjectId:  uid,
-				}
-				w.Quads = append(w.Quads, quad)
-			}
-			w.WaitArray = w.WaitArray[:len(w.WaitArray)-1]
+		// do nothing if this is an empty array []
+		if t == json.TagArrayStart {
+			break
 		}
 	}
 
@@ -145,8 +125,13 @@ func (w *Walk) Read(i json.Iter, t, n json.Tag) bool {
 			w.Push()
 			w.Status = PREDICATE
 		case UID:
+			// TODO: if we find a uid, we need to delete the previously
+			//       generated uid (c.* string from getNextBlank function) so
+			//       that when we check w.Wait for nquads referencing this
+			//       object we can use the correct uid
 			s, _ := i.String()
-			w.Level[len(w.Level)-1].Uid = append(w.Level[len(w.Level)-1].Uid, s)
+			curr := w.Level[len(w.Level)-1]
+			curr.Uid[len(curr.Uid)-1] = s
 			w.Quad = &Quad{}
 			w.Status = PREDICATE
 		}
@@ -242,16 +227,15 @@ func (w *Walk) Read(i json.Iter, t, n json.Tag) bool {
 		}
 
 	case json.TagObjectEnd:
-		// TODO: check this
-		//
-		/*
-			if len(w.WaitObject) > 0 {
-				wait := w.WaitObject[len(w.WaitObject)-1]
-				wait.ObjectId = w.Level[len(w.Level)-1].Top()
-				w.Quads = append(w.Quads, wait)
-				w.WaitObject = w.WaitObject[:len(w.WaitObject)-1]
+		if len(w.WaitArray) > 0 {
+			if len(w.Level) >= 2 {
+				curr := w.Level[len(w.Level)-1]
+				under := w.Level[len(w.Level)-2]
+				if under.Type == ARRAY {
+					under.Uid = append(under.Uid, curr.Uid[0])
+				}
 			}
-		*/
+		}
 		w.Level = w.Level[:len(w.Level)-1]
 		switch n {
 		case json.TagObjectStart:
@@ -261,6 +245,19 @@ func (w *Walk) Read(i json.Iter, t, n json.Tag) bool {
 		}
 
 	case json.TagArrayEnd:
+		if len(w.WaitArray) > 0 {
+			wait := w.WaitArray[len(w.WaitArray)-1]
+			uids := w.Level[len(w.Level)-1].Uid
+			for _, uid := range uids {
+				quad := &Quad{
+					Subject:   wait.Subject,
+					Predicate: wait.Predicate,
+					ObjectId:  uid,
+				}
+				w.Quads = append(w.Quads, quad)
+			}
+			w.WaitArray = w.WaitArray[:len(w.WaitArray)-1]
+		}
 		w.Level = w.Level[:len(w.Level)-1]
 		switch n {
 		case json.TagArrayStart:
@@ -279,16 +276,8 @@ func (w *Walk) Read(i json.Iter, t, n json.Tag) bool {
 		}
 
 	case json.TagEnd:
-		fmt.Println(t, n, w.Level, w.Status)
 		return true
 	}
-
-	tl := &Quad{}
-	l := len(w.WaitArray)
-	if l != 0 {
-		tl = w.WaitArray[l-1]
-	}
-	fmt.Println(t, n, len(w.Level), tl, w.Status)
 	return false
 }
 
