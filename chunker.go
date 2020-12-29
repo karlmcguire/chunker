@@ -28,7 +28,26 @@ const (
 	OBJECT
 	ARRAY
 	UID
+	GEO
 )
+
+func (s Status) String() string {
+	switch s {
+	case PREDICATE:
+		return "PREDICATE"
+	case SCALAR:
+		return "SCALAR"
+	case OBJECT:
+		return "OBJECT"
+	case ARRAY:
+		return "ARRAY"
+	case UID:
+		return "UID"
+	case GEO:
+		return "GEO"
+	}
+	return "?"
+}
 
 type Level struct {
 	Type Status
@@ -51,9 +70,11 @@ type Walk struct {
 	Skip       bool
 	WaitArray  []*Quad
 	WaitObject []*Quad
+
+	debug bool
 }
 
-func NewWalk() *Walk {
+func NewWalk(debug bool) *Walk {
 	return &Walk{
 		Status:     OBJECT,
 		Quad:       &Quad{},
@@ -61,6 +82,7 @@ func NewWalk() *Walk {
 		Level:      make([]*Level, 0),
 		WaitArray:  make([]*Quad, 0),
 		WaitObject: make([]*Quad, 0),
+		debug:      debug,
 	}
 }
 
@@ -105,6 +127,8 @@ func (w *Walk) Read(i json.Iter, t, n json.Tag) bool {
 			default:
 				if w.Quad.Predicate == "uid" {
 					w.Status = UID
+				} else if w.Quad.Predicate == "type" {
+					w.Status = GEO
 				} else {
 					w.Status = SCALAR
 				}
@@ -114,14 +138,31 @@ func (w *Walk) Read(i json.Iter, t, n json.Tag) bool {
 			w.Push()
 			w.Status = PREDICATE
 		case UID:
-			// TODO: if we find a uid, we need to delete the previously
-			//       generated uid (c.* string from getNextBlank function) so
-			//       that when we check w.Wait for nquads referencing this
-			//       object we can use the correct uid
 			s, _ := i.String()
 			curr := w.Level[len(w.Level)-1]
 			curr.Uid[len(curr.Uid)-1] = s
 			w.Quad = &Quad{}
+			w.Status = PREDICATE
+		case GEO:
+			s, _ := i.String()
+			switch s {
+			case "Point":
+				fallthrough
+			case "LineString":
+				fallthrough
+			case "Polygon":
+				fallthrough
+			case "MultiPoint":
+				fallthrough
+			case "MultiLineString":
+				fallthrough
+			case "MultiPolygon":
+				fallthrough
+			case "GeometryCollection":
+				fmt.Println("found geo: ", s)
+				// TODO: handle geo object
+			default:
+			}
 			w.Status = PREDICATE
 		}
 
@@ -278,16 +319,19 @@ func (w *Walk) Read(i json.Iter, t, n json.Tag) bool {
 		return true
 	}
 
+	if w.debug {
+		fmt.Println(t, n, w.Status)
+	}
 	return false
 }
 
-func Parse(d []byte) ([]*Quad, error) {
+func Parse(d []byte, debug bool) ([]*Quad, error) {
 	tape, err := json.Parse(d, nil)
 	if err != nil {
 		return nil, err
 	}
 
-	walk := NewWalk()
+	walk := NewWalk(debug)
 
 	done := false
 	for iter := tape.Iter(); !done; {
