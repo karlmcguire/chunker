@@ -28,6 +28,7 @@ const (
 	OBJECT
 	ARRAY
 	UID
+	MAYBE_GEO
 	GEO
 )
 
@@ -43,6 +44,8 @@ func (s Status) String() string {
 		return "ARRAY"
 	case UID:
 		return "UID"
+	case MAYBE_GEO:
+		return "MAYBE_GEO"
 	case GEO:
 		return "GEO"
 	}
@@ -128,7 +131,7 @@ func (w *Walk) Read(i json.Iter, t, n json.Tag) bool {
 				if w.Quad.Predicate == "uid" {
 					w.Status = UID
 				} else if w.Quad.Predicate == "type" {
-					w.Status = GEO
+					w.Status = MAYBE_GEO
 				} else {
 					w.Status = SCALAR
 				}
@@ -143,7 +146,7 @@ func (w *Walk) Read(i json.Iter, t, n json.Tag) bool {
 			curr.Uid[len(curr.Uid)-1] = s
 			w.Quad = &Quad{}
 			w.Status = PREDICATE
-		case GEO:
+		case MAYBE_GEO:
 			s, _ := i.String()
 			switch s {
 			case "Point":
@@ -159,11 +162,11 @@ func (w *Walk) Read(i json.Iter, t, n json.Tag) bool {
 			case "MultiPolygon":
 				fallthrough
 			case "GeometryCollection":
+				w.Status = GEO
 				fmt.Println("found geo: ", s)
-				// TODO: handle geo object
 			default:
+				w.Status = PREDICATE
 			}
-			w.Status = PREDICATE
 		}
 
 	case json.TagInteger:
@@ -257,6 +260,9 @@ func (w *Walk) Read(i json.Iter, t, n json.Tag) bool {
 		}
 
 	case json.TagObjectEnd:
+		if w.Status == GEO {
+			fmt.Println("ending the GEO object here")
+		}
 		if len(w.WaitArray) > 0 {
 			if len(w.Level) >= 2 {
 				curr := w.Level[len(w.Level)-1]
