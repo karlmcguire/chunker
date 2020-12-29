@@ -35,6 +35,7 @@ type Level struct {
 	Uid  []string
 }
 
+// TODO; this seems like a weird function to need/have
 func (l *Level) Top() string {
 	if len(l.Uid) == 0 {
 		return ""
@@ -73,24 +74,6 @@ func (w *Walk) Read(i json.Iter, t, n json.Tag) bool {
 	if w.Skip {
 		w.Skip = false
 		return false
-	}
-
-	switch n {
-	case json.TagObjectEnd:
-		// TODO: do something here to keep the uids of the object level within
-		//       an array so when we complete an array (below) we can generate
-		//       the quads referencing objects with their uids
-		//
-		// do nothing if this is an empty object {}
-		if t == json.TagObjectStart {
-			break
-		}
-
-	case json.TagArrayEnd:
-		// do nothing if this is an empty array []
-		if t == json.TagArrayStart {
-			break
-		}
 	}
 
 	switch t {
@@ -278,6 +261,7 @@ func (w *Walk) Read(i json.Iter, t, n json.Tag) bool {
 	case json.TagEnd:
 		return true
 	}
+
 	return false
 }
 
