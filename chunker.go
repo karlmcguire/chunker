@@ -225,6 +225,16 @@ func (w *Walk) Read(i json.Iter, t, n json.Tag) bool {
 				}
 			}
 		}
+		if len(w.WaitObject) > 0 {
+			wait := w.WaitObject[len(w.WaitObject)-1]
+			uid := w.Level[len(w.Level)-1].Uid[0]
+			w.Quads = append(w.Quads, &Quad{
+				Subject:   wait.Subject,
+				Predicate: wait.Predicate,
+				ObjectId:  uid,
+			})
+			w.WaitObject = w.WaitObject[:len(w.WaitObject)-1]
+		}
 		w.Level = w.Level[:len(w.Level)-1]
 		switch n {
 		case json.TagObjectStart:
@@ -283,6 +293,9 @@ func Parse(d []byte) ([]*Quad, error) {
 	for iter := tape.Iter(); !done; {
 		done = walk.Read(iter, iter.AdvanceInto(), iter.PeekNextTag())
 	}
+
+	// NOTE: this is important for tests to work properly
+	subjectCounter = 0
 
 	return walk.Quads, nil
 }

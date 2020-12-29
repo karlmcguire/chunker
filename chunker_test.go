@@ -9,7 +9,7 @@ type Case struct {
 	Quad []Quad
 }
 
-func Test(t *testing.T) {
+func Test1(t *testing.T) {
 	c := &Case{
 		`{
 			"name": "Alice",
@@ -53,17 +53,11 @@ func Test(t *testing.T) {
 		}},
 	}
 
-	//w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-	//fmt.Fprintf(w, "subj\tpred\to_id\to_val\n")
-	//fmt.Fprintf(w, "----\t----\t-----\t----\n")
-
 	quads, err := Parse([]byte(c.Json))
 	if err != nil {
 		t.Fatal(err)
 	}
 	for i, quad := range quads {
-		//fmt.Fprintf(w, "%s\t%s\t%s\t%v\n",
-		//	quad.Subject, quad.Predicate, quad.ObjectId, quad.ObjectVal)
 		if quad.Subject != c.Quad[i].Subject {
 			t.Fatal("bad subject")
 		}
@@ -77,6 +71,49 @@ func Test(t *testing.T) {
 			t.Fatal("bad object val")
 		}
 	}
+}
 
-	//w.Flush()
+func Test2(t *testing.T) {
+	c := &Case{
+		`{
+			"name": "Alice",
+			"address": {},
+			"school": {
+				"name": "Wellington Public School"
+			}
+		}`,
+
+		[]Quad{{
+			Subject:   "c.1",
+			Predicate: "name",
+			ObjectVal: "Alice",
+		}, {
+			Subject:   "c.2",
+			Predicate: "name",
+			ObjectVal: "Wellington Public School",
+		}, {
+			Subject:   "c.1",
+			Predicate: "school",
+			ObjectId:  "c.2",
+		}},
+	}
+
+	quads, err := Parse([]byte(c.Json))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i, quad := range quads {
+		if quad.Subject != c.Quad[i].Subject {
+			t.Fatal("bad subject")
+		}
+		if quad.Predicate != c.Quad[i].Predicate {
+			t.Fatal("bad predicate")
+		}
+		if quad.ObjectId != c.Quad[i].ObjectId {
+			t.Fatal("bad object id")
+		}
+		if quad.ObjectVal != c.Quad[i].ObjectVal {
+			t.Fatal("bad object val")
+		}
+	}
 }
