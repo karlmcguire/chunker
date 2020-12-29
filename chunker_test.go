@@ -1,7 +1,10 @@
 package chunker
 
 import (
+	"fmt"
+	"os"
 	"testing"
+	"text/tabwriter"
 )
 
 type Case struct {
@@ -116,4 +119,50 @@ func Test2(t *testing.T) {
 			t.Fatal("bad object val")
 		}
 	}
+}
+
+func Test3(t *testing.T) {
+	c := &Case{
+		`[
+			{
+				"name": "Alice",
+				"mobile": "040123456",
+				"car": "MA0123", 
+				"age": 21, 
+				"weight": 58.7
+			}
+		]`,
+		[]Quad{
+			{"c.1", "name", "", "Alice"},
+			{"c.1", "mobile", "", "040123456"},
+			{"c.1", "car", "", "MA0123"},
+			{"c.1", "age", "", 21},
+			{"c.1", "weight", "", 58.7},
+		},
+	}
+
+	w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
+	fmt.Fprintf(w, "subj\tpred\to_id\to_val\n")
+	fmt.Fprintf(w, "----\t----\t-----\t----\n")
+	quads, err := Parse([]byte(c.Json))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i, quad := range quads {
+		fmt.Fprintf(w, "%s\t%s\t%s\t%v\n",
+			quad.Subject, quad.Predicate, quad.ObjectId, quad.ObjectVal)
+		if quad.Subject != c.Quad[i].Subject {
+			t.Fatal("bad subject")
+		}
+		if quad.Predicate != c.Quad[i].Predicate {
+			t.Fatal("bad predicate")
+		}
+		if quad.ObjectId != c.Quad[i].ObjectId {
+			t.Fatal("bad object id")
+		}
+		if fmt.Sprintf("%v", quad.ObjectVal) != fmt.Sprintf("%v", c.Quad[i].ObjectVal) {
+			t.Fatal("bad object val")
+		}
+	}
+	w.Flush()
 }
