@@ -80,6 +80,18 @@ func (w *Walk) Read(i json.Iter, t, n json.Tag) bool {
 		// TODO: do something here to keep the uids of the object level within
 		//       an array so when we complete an array (below) we can generate
 		//       the quads referencing objects with their uids
+		//
+		// TODO: make sure this won't break anything else, seems to be working
+		//       for now, but it's not pretty
+		if len(w.WaitArray) > 0 {
+			if len(w.Level) >= 2 {
+				curr := w.Level[len(w.Level)-1]
+				under := w.Level[len(w.Level)-2]
+				if under.Type == ARRAY {
+					under.Uid = append(under.Uid, curr.Uid...)
+				}
+			}
+		}
 	case json.TagArrayEnd:
 		if len(w.WaitArray) > 0 {
 			fmt.Println()
@@ -88,12 +100,15 @@ func (w *Walk) Read(i json.Iter, t, n json.Tag) bool {
 			}
 			fmt.Println()
 			wait := w.WaitArray[len(w.WaitArray)-1]
-			quad := &Quad{
-				Subject:   wait.Subject,
-				Predicate: wait.Predicate,
-				ObjectId:  w.Level[len(w.Level)-1].Top(),
+			uids := w.Level[len(w.Level)-1].Uid
+			for _, uid := range uids {
+				quad := &Quad{
+					Subject:   wait.Subject,
+					Predicate: wait.Predicate,
+					ObjectId:  uid,
+				}
+				w.Quads = append(w.Quads, quad)
 			}
-			w.Quads = append(w.Quads, quad)
 			w.WaitArray = w.WaitArray[:len(w.WaitArray)-1]
 		}
 	}

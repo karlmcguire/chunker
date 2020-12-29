@@ -1,9 +1,10 @@
 package chunker
 
 import (
+	"fmt"
+	"os"
 	"testing"
-
-	"github.com/davecgh/go-spew/spew"
+	"text/tabwriter"
 )
 
 /*
@@ -91,11 +92,20 @@ func Test(t *testing.T) {
 		},
 	}
 
+	w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
+	fmt.Fprintf(w, "subj\tpred\to_id\to_val\n")
+	fmt.Fprintf(w, "----\t----\t-----\t----\n")
 	for _, c := range cases {
 		quads, err := Parse([]byte(c.Json))
 		if err != nil {
 			t.Fatal(err)
 		}
-		spew.Dump(quads)
+		for _, quad := range quads {
+			fmt.Fprintf(w, "%s\t%s\t%s\t%v\n",
+				quad.Subject, quad.Predicate, quad.ObjectId, quad.ObjectVal)
+		}
 	}
+	fmt.Println()
+	w.Flush()
+	fmt.Println()
 }
