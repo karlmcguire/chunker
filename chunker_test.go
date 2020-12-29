@@ -12,6 +12,60 @@ type Case struct {
 	Quad []Quad
 }
 
+func TestGeo(t *testing.T) {
+	c := &Case{
+		`{
+			"name": "Alice",
+			"age": 26,
+			"married": true,
+			"now": "2020-12-29T17:39:34.816808024Z",
+			"address": {
+				"type": "Point",
+				"coordinates": [
+					1.1, 
+					2
+				]
+			}
+		}`,
+
+		[]Quad{
+			{"c.1", "name", "", "Alice"},
+			{"c.1", "age", "", 26},
+			{"c.1", "married", "", true},
+			{"c.1", "now", "", "2020-12-29T17:39:34.816808024Z"},
+			{"c.1", "address", "", "geoval"}, // TODO: geoval parsing
+		},
+	}
+
+	w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
+	fmt.Fprintf(w, "subj\tpred\to_id\to_val\n")
+	fmt.Fprintf(w, "----\t----\t-----\t----\n")
+
+	quads, err := Parse([]byte(c.Json), true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, quad := range quads {
+		fmt.Fprintf(w, "%s\t%s\t%s\t%v\n",
+			quad.Subject, quad.Predicate, quad.ObjectId, quad.ObjectVal)
+		/*
+			if quad.Subject != c.Quad[i].Subject {
+				t.Fatal("bad subject")
+			}
+			if quad.Predicate != c.Quad[i].Predicate {
+				t.Fatal("bad predicate")
+			}
+			if quad.ObjectId != c.Quad[i].ObjectId {
+				t.Fatal("bad object id")
+			}
+			if fmt.Sprintf("%v", quad.ObjectVal) != fmt.Sprintf("%v", c.Quad[i].ObjectVal) {
+				t.Fatal("bad object val")
+			}
+		*/
+	}
+	w.Flush()
+}
+
 func Test1(t *testing.T) {
 	c := &Case{
 		`{
@@ -299,58 +353,4 @@ func Test5(t *testing.T) {
 	if len(quads) != len(c.Quad) {
 		t.Fatal("quads returned are incorrect")
 	}
-}
-
-func TestGeo(t *testing.T) {
-	c := &Case{
-		`{
-			"name": "Alice",
-			"age": 26,
-			"married": true,
-			"now": "2020-12-29T17:39:34.816808024Z",
-			"address": {
-				"type": "Point",
-				"coordinates": [
-					1.1, 
-					2
-				]
-			}
-		}`,
-
-		[]Quad{
-			{"c.1", "name", "", "Alice"},
-			{"c.1", "age", "", 26},
-			{"c.1", "married", "", true},
-			{"c.1", "now", "", "2020-12-29T17:39:34.816808024Z"},
-			{"c.1", "address", "", "geoval"}, // TODO: geoval parsing
-		},
-	}
-
-	w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-	fmt.Fprintf(w, "subj\tpred\to_id\to_val\n")
-	fmt.Fprintf(w, "----\t----\t-----\t----\n")
-
-	quads, err := Parse([]byte(c.Json), true)
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, quad := range quads {
-		fmt.Fprintf(w, "%s\t%s\t%s\t%v\n",
-			quad.Subject, quad.Predicate, quad.ObjectId, quad.ObjectVal)
-		/*
-			if quad.Subject != c.Quad[i].Subject {
-				t.Fatal("bad subject")
-			}
-			if quad.Predicate != c.Quad[i].Predicate {
-				t.Fatal("bad predicate")
-			}
-			if quad.ObjectId != c.Quad[i].ObjectId {
-				t.Fatal("bad object id")
-			}
-			if fmt.Sprintf("%v", quad.ObjectVal) != fmt.Sprintf("%v", c.Quad[i].ObjectVal) {
-				t.Fatal("bad object val")
-			}
-		*/
-	}
-	w.Flush()
 }

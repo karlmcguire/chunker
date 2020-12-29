@@ -73,6 +73,7 @@ type Walk struct {
 	Skip       bool
 	WaitArray  []*Quad
 	WaitObject []*Quad
+	WaitGeo    []*Quad
 
 	debug bool
 }
@@ -85,6 +86,7 @@ func NewWalk(debug bool) *Walk {
 		Level:      make([]*Level, 0),
 		WaitArray:  make([]*Quad, 0),
 		WaitObject: make([]*Quad, 0),
+		WaitGeo:    make([]*Quad, 0),
 		debug:      debug,
 	}
 }
@@ -95,12 +97,6 @@ func (w *Walk) Push() {
 	w.Quad = &Quad{}
 }
 
-// TODO: manage WaitObject stack similar to the way WaitArray is already managed
-//       and if anything it should be easier because we don't have to deal with
-//       multiple reference quads like with arrays (if we need to do this,
-//       haven't checked the spec yet)
-//
-// TODO: performance tuning
 func (w *Walk) Read(i json.Iter, t, n json.Tag) bool {
 	if w.Skip {
 		w.Skip = false
@@ -131,7 +127,7 @@ func (w *Walk) Read(i json.Iter, t, n json.Tag) bool {
 				if w.Quad.Predicate == "uid" {
 					w.Status = UID
 				} else if w.Quad.Predicate == "type" {
-					w.Status = MAYBE_GEO
+					w.Status = GEO
 				} else {
 					w.Status = SCALAR
 				}
@@ -146,27 +142,24 @@ func (w *Walk) Read(i json.Iter, t, n json.Tag) bool {
 			curr.Uid[len(curr.Uid)-1] = s
 			w.Quad = &Quad{}
 			w.Status = PREDICATE
-		case MAYBE_GEO:
+		case GEO:
 			s, _ := i.String()
 			switch s {
-			case "Point":
+			case "Point", "MultiPoint":
 				fallthrough
-			case "LineString":
+			case "LineString", "MultiLineString":
 				fallthrough
-			case "Polygon":
-				fallthrough
-			case "MultiPoint":
-				fallthrough
-			case "MultiLineString":
-				fallthrough
-			case "MultiPolygon":
+			case "Polygon", "MultiPolygon":
 				fallthrough
 			case "GeometryCollection":
-				w.Status = GEO
-				fmt.Println("found geo: ", s)
-			default:
-				w.Status = PREDICATE
+				if len(w.WaitObject) == 0 {
+					fmt.Println("WARNING this should never happen WARNING")
+					break
+				}
+				w.WaitGeo = append(w.WaitGeo, w.WaitObject[len(w.WaitObject)-1])
+				w.WaitObject = w.WaitObject[:len(w.WaitObject)-1]
 			}
+			w.Status = PREDICATE
 		}
 
 	case json.TagInteger:
@@ -260,8 +253,8 @@ func (w *Walk) Read(i json.Iter, t, n json.Tag) bool {
 		}
 
 	case json.TagObjectEnd:
-		if w.Status == GEO {
-			fmt.Println("ending the GEO object here")
+		if len(w.WaitGeo) > 0 {
+
 		}
 		if len(w.WaitArray) > 0 {
 			if len(w.Level) >= 2 {
