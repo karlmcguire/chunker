@@ -275,9 +275,7 @@ func (p *Parser) Scan(c, n json.Tag, i json.Iter) (done bool, err error) {
 		case json.TagObjectStart:
 			p.State = OBJECT
 		case json.TagObjectEnd:
-			if p.Queue.Recent(OBJECT) {
-				p.Queue.Pop()
-			}
+			p.Queue.Pop()
 			p.State = PREDICATE
 			p.Skip = true
 		case json.TagArrayStart:
@@ -323,20 +321,14 @@ func (p *Parser) Scan(c, n json.Tag, i json.Iter) (done bool, err error) {
 		case json.TagArrayStart:
 			p.State = ARRAY
 		case json.TagArrayEnd:
-			if p.Queue.Recent(ARRAY) {
-				p.Queue.Pop()
-			}
+			p.Queue.Pop()
 			p.State = PREDICATE
 			p.Skip = true
 		}
 
 	case json.TagArrayEnd:
-		level := p.Depth.Decrease(ARRAY)
-		fmt.Println(level)
+		//subject := p.Depth.Decrease(ARRAY).Subject()
 		if !p.Queue.Empty() {
-			fmt.Println()
-			fmt.Println(p.Queue.Pop())
-			fmt.Println()
 		}
 		switch n {
 		case json.TagString:
