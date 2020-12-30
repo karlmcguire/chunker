@@ -6,6 +6,8 @@ import (
 	json "github.com/minio/simdjson-go"
 )
 
+var uidCounter = 0
+
 type ParserState uint8
 
 const (
@@ -35,16 +37,58 @@ func (s ParserState) String() string {
 	return "?"
 }
 
+////////////////////////////////////////////////////////////////////////////////
+
 type (
-	Depth struct {
-		Levels []*Level
+	Queue struct {
+		Waiting []*QueueQuad
 	}
 
-	Level struct {
+	QueueQuad struct {
 		Type ParserState
-		Uids []string
+		Quad *Quad
 	}
 )
+
+func NewQueue() *Queue {
+	return &Queue{
+		Waiting: make([]*QueueQuad, 0),
+	}
+}
+
+func (q *Queue) Add(t ParserState, quad *Quad) {
+	q.Waiting = append(q.Waiting, &QueueQuad{
+		Type: t,
+		Quad: quad,
+	})
+}
+
+////////////////////////////////////////////////////////////////////////////////
+
+type Level struct {
+	Type ParserState
+	Uids []string
+	Uid  string
+}
+
+func NewLevel(t ParserState) *Level {
+	uidCounter++
+	return &Level{
+		Type: t,
+		Uids: make([]string, 0),
+		Uid:  fmt.Sprintf("%d", uidCounter),
+	}
+}
+
+func (l *Level) Subject() string {
+	return l.Uid
+}
+
+////////////////////////////////////////////////////////////////////////////////
+
+type Depth struct {
+	Levels []*Level
+}
 
 func NewDepth() *Depth {
 	return &Depth{
@@ -52,20 +96,38 @@ func NewDepth() *Depth {
 	}
 }
 
+func (d *Depth) Subject() string {
+	return d.Levels[len(d.Levels)-1].Subject()
+}
+
 func (d *Depth) Increase(t ParserState) {
-	d.Levels = append(d.Levels, &Level{
-		Type: t,
-		Uids: make([]string, 0),
-	})
+	d.Levels = append(d.Levels, NewLevel(t))
 }
 
 func (d *Depth) Decrease(t ParserState) {
 	d.Levels = d.Levels[:len(d.Levels)-1]
 }
 
+func (d *Depth) String() string {
+	o := ""
+	for _, level := range d.Levels {
+		if level.Type == OBJECT {
+			o += "O "
+		} else if level.Type == ARRAY {
+			o += "A "
+		} else {
+			o += "? "
+		}
+	}
+	return o
+}
+
+////////////////////////////////////////////////////////////////////////////////
+
 type Parser struct {
 	State ParserState
 	Quads []*Quad
+	Queue *Queue
 	Depth *Depth
 	Quad  *Quad
 	Skip  bool
@@ -76,6 +138,7 @@ func NewParser() *Parser {
 		State: NONE,
 		Quads: make([]*Quad, 0),
 		Depth: NewDepth(),
+		Queue: NewQueue(),
 		Quad:  &Quad{},
 	}
 }
@@ -115,18 +178,36 @@ func (p *Parser) Scan(c, n json.Tag, i json.Iter) (done bool, err error) {
 			}
 			switch n {
 			case json.TagObjectStart:
+				p.State = OBJECT
+				p.FoundSubject(OBJECT, p.Depth.Subject())
 			case json.TagArrayStart:
+				p.State = ARRAY
+				p.FoundSubject(ARRAY, p.Depth.Subject())
 			default:
+				switch p.Quad.Predicate {
+				case "uid":
+				case "type":
+				default:
+					p.State = SCALAR
+				}
 			}
 		case SCALAR:
-		case OBJECT:
-		case ARRAY:
+			p.State = PREDICATE
+			if err = p.FoundValue(i.String()); err != nil {
+				return
+			}
+		case ARRAY_SCALAR:
+			p.State = ARRAY_SCALAR
+			if err = p.FoundValue(i.String()); err != nil {
+				return
+			}
 		}
 
 	case json.TagFloat:
 		switch p.State {
 		case SCALAR:
-			if p.State, err = p.FoundValue(i.Float()); err != nil {
+			p.State = PREDICATE
+			if err = p.FoundValue(i.Float()); err != nil {
 				return
 			}
 		}
@@ -134,7 +215,8 @@ func (p *Parser) Scan(c, n json.Tag, i json.Iter) (done bool, err error) {
 	case json.TagUint, json.TagInteger:
 		switch p.State {
 		case SCALAR:
-			if p.State, err = p.FoundValue(i.Int()); err != nil {
+			p.State = PREDICATE
+			if err = p.FoundValue(i.Int()); err != nil {
 				return
 			}
 		}
@@ -142,7 +224,8 @@ func (p *Parser) Scan(c, n json.Tag, i json.Iter) (done bool, err error) {
 	case json.TagBoolFalse, json.TagBoolTrue:
 		switch p.State {
 		case SCALAR:
-			if p.State, err = p.FoundValue(i.Bool()); err != nil {
+			p.State = PREDICATE
+			if err = p.FoundValue(i.Bool()); err != nil {
 				return
 			}
 		}
@@ -213,12 +296,24 @@ func (p *Parser) Scan(c, n json.Tag, i json.Iter) (done bool, err error) {
 			p.State = OBJECT
 		}
 
-	case json.TagNull:
+	case json.TagNull: // TODO
 	case json.TagRoot:
+		switch n {
+		case json.TagObjectStart:
+			p.State = OBJECT
+		case json.TagArrayStart:
+			p.State = ARRAY
+		}
+
 	case json.TagEnd:
 		done = true
 	}
 	return
+}
+
+func (p *Parser) FoundSubject(t ParserState, s string) {
+	p.Queue.Add(t, p.Quad)
+	p.Quad = &Quad{}
 }
 
 func (p *Parser) FoundPredicate(s string, err error) error {
@@ -226,12 +321,16 @@ func (p *Parser) FoundPredicate(s string, err error) error {
 	return err
 }
 
-func (p *Parser) FoundValue(v interface{}, err error) (ParserState, error) {
-	return NONE, nil
+func (p *Parser) FoundValue(v interface{}, err error) error {
+	p.Quad.ObjectVal = v
+	p.Quad.Subject = p.Depth.Subject()
+	p.Quads = append(p.Quads, p.Quad)
+	p.Quad = &Quad{}
+	return nil
 }
 
 func (p *Parser) Log(c, n json.Tag) {
-	fmt.Println(c, n, p.State, p.Depth.Levels)
+	fmt.Println(c, n, p.Depth, p.State)
 }
 
 func Parse(d []byte) ([]*Quad, error) {
