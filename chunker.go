@@ -40,8 +40,6 @@ func (s ParserState) String() string {
 	return "?"
 }
 
-////////////////////////////////////////////////////////////////////////////////
-
 type (
 	Queue struct {
 		Waiting []*QueueQuad
@@ -63,10 +61,13 @@ func (q *Queue) Recent(t ParserState) bool {
 	return q.Waiting[len(q.Waiting)-1].Type == t
 }
 
-func (q *Queue) Pop() *Quad {
-	quad := q.Waiting[len(q.Waiting)-1].Quad
+func (q *Queue) Pop(t ParserState) *Quad {
+	waiting := q.Waiting[len(q.Waiting)-1]
+	if waiting.Type != t {
+		return nil
+	}
 	q.Waiting = q.Waiting[:len(q.Waiting)-1]
-	return quad
+	return waiting.Quad
 }
 
 func (q *Queue) Add(t ParserState, quad *Quad) {
@@ -79,8 +80,6 @@ func (q *Queue) Add(t ParserState, quad *Quad) {
 func (q *Queue) Empty() bool {
 	return len(q.Waiting) == 0
 }
-
-////////////////////////////////////////////////////////////////////////////////
 
 type Level struct {
 	Type ParserState
@@ -106,8 +105,6 @@ func (l *Level) Subject() string {
 	return l.Uids[len(l.Uids)-1]
 }
 
-////////////////////////////////////////////////////////////////////////////////
-
 type Depth struct {
 	Levels []*Level
 }
@@ -116,6 +113,21 @@ func NewDepth() *Depth {
 	return &Depth{
 		Levels: make([]*Level, 0),
 	}
+}
+
+func (d *Depth) ArrayObject() bool {
+	if len(d.Levels) < 2 {
+		return false
+	}
+	return d.Levels[len(d.Levels)-2].Type == ARRAY
+}
+
+func (d *Depth) ArrayUid(uid string) {
+	if len(d.Levels) < 2 {
+		return
+	}
+	array := d.Levels[len(d.Levels)-2]
+	array.Uids = append(array.Uids, uid)
 }
 
 func (d *Depth) Uid(uid string) {
@@ -150,8 +162,6 @@ func (d *Depth) String() string {
 	}
 	return o
 }
-
-////////////////////////////////////////////////////////////////////////////////
 
 type Parser struct {
 	State ParserState
@@ -196,7 +206,7 @@ func (p *Parser) Scan(c, n json.Tag, i json.Iter) (done bool, err error) {
 		return
 	}
 
-	defer p.Log(c, n)
+	//defer p.Log(c, n)
 	switch c {
 
 	case json.TagString:
@@ -221,16 +231,17 @@ func (p *Parser) Scan(c, n json.Tag, i json.Iter) (done bool, err error) {
 					p.State = SCALAR
 				}
 			}
+
 		case SCALAR:
 			p.State = PREDICATE
 			if err = p.FoundValue(i.String()); err != nil {
 				return
 			}
+
 		case ARRAY_SCALAR:
-			p.State = ARRAY_SCALAR
-			if err = p.FoundValue(i.String()); err != nil {
-				return
-			}
+			// TODO: handle string values within arrays, how do those become
+			//       quads?
+
 		case UID:
 			p.State = PREDICATE
 			if err = p.FoundUid(i.String()); err != nil {
@@ -245,6 +256,8 @@ func (p *Parser) Scan(c, n json.Tag, i json.Iter) (done bool, err error) {
 			if err = p.FoundValue(i.Float()); err != nil {
 				return
 			}
+		case ARRAY_SCALAR:
+			// TODO: might need to handle arrays like this for geo objects
 		}
 
 	case json.TagUint, json.TagInteger:
@@ -254,6 +267,8 @@ func (p *Parser) Scan(c, n json.Tag, i json.Iter) (done bool, err error) {
 			if err = p.FoundValue(i.Int()); err != nil {
 				return
 			}
+		case ARRAY_SCALAR:
+			// TODO: might need to handle arrays like this for geo objects
 		}
 
 	case json.TagBoolFalse, json.TagBoolTrue:
@@ -263,6 +278,8 @@ func (p *Parser) Scan(c, n json.Tag, i json.Iter) (done bool, err error) {
 			if err = p.FoundValue(i.Bool()); err != nil {
 				return
 			}
+		case ARRAY_SCALAR:
+			// TODO: might need to handle arrays like this for geo objects
 		}
 
 	case json.TagObjectStart:
@@ -275,32 +292,11 @@ func (p *Parser) Scan(c, n json.Tag, i json.Iter) (done bool, err error) {
 		case json.TagObjectStart:
 			p.State = OBJECT
 		case json.TagObjectEnd:
-			p.Queue.Pop()
+			p.Queue.Pop(OBJECT)
 			p.State = PREDICATE
 			p.Skip = true
 		case json.TagArrayStart:
 			p.State = ARRAY
-		}
-
-	case json.TagObjectEnd:
-		objectId := p.Depth.Decrease(OBJECT).Subject()
-		if !p.Queue.Empty() {
-			waiting := p.Queue.Pop()
-			p.Quads = append(p.Quads, &Quad{
-				Subject:   p.Depth.Subject(),
-				Predicate: waiting.Predicate,
-				ObjectId:  objectId,
-			})
-		}
-		switch n {
-		case json.TagString:
-			fallthrough
-		case json.TagObjectEnd:
-			fallthrough
-		case json.TagArrayEnd:
-			p.State = PREDICATE
-		case json.TagObjectStart:
-			p.State = OBJECT
 		}
 
 	case json.TagArrayStart:
@@ -321,14 +317,48 @@ func (p *Parser) Scan(c, n json.Tag, i json.Iter) (done bool, err error) {
 		case json.TagArrayStart:
 			p.State = ARRAY
 		case json.TagArrayEnd:
-			p.Queue.Pop()
+			p.Queue.Pop(ARRAY)
 			p.State = PREDICATE
 			p.Skip = true
 		}
 
-	case json.TagArrayEnd:
-		//subject := p.Depth.Decrease(ARRAY).Subject()
+	case json.TagObjectEnd:
+		if p.Depth.ArrayObject() {
+			p.Depth.ArrayUid(p.Depth.Subject())
+		}
+		objectId := p.Depth.Decrease(OBJECT).Subject()
 		if !p.Queue.Empty() {
+			if waiting := p.Queue.Pop(OBJECT); waiting != nil {
+				p.Quads = append(p.Quads, &Quad{
+					Subject:   p.Depth.Subject(),
+					Predicate: waiting.Predicate,
+					ObjectId:  objectId,
+				})
+			}
+		}
+		switch n {
+		case json.TagString:
+			fallthrough
+		case json.TagObjectEnd:
+			fallthrough
+		case json.TagArrayEnd:
+			p.State = PREDICATE
+		case json.TagObjectStart:
+			p.State = OBJECT
+		}
+
+	case json.TagArrayEnd:
+		if !p.Queue.Empty() {
+			if waiting := p.Queue.Pop(ARRAY); waiting != nil {
+				uids := p.Depth.Decrease(ARRAY).Uids
+				for _, uid := range uids {
+					p.Quads = append(p.Quads, &Quad{
+						Subject:   p.Depth.Subject(),
+						Predicate: waiting.Predicate,
+						ObjectId:  uid,
+					})
+				}
+			}
 		}
 		switch n {
 		case json.TagString:
