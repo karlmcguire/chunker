@@ -40,15 +40,28 @@ func TestGeo(t *testing.T) {
 	w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
 	fmt.Fprintf(w, "subj\tpred\to_id\to_val\n")
 	fmt.Fprintf(w, "----\t----\t-----\t----\n")
+	defer w.Flush()
+
 	quads, err := Parse([]byte(c.Json))
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, quad := range quads {
+	for i, quad := range quads {
 		fmt.Fprintf(w, "%s\t%s\t%s\t%v\n",
 			quad.Subject, quad.Predicate, quad.ObjectId, quad.ObjectVal)
+		if quad.Subject != c.Quad[i].Subject {
+			t.Fatal("bad subject")
+		}
+		if quad.Predicate != c.Quad[i].Predicate {
+			t.Fatal("bad predicate")
+		}
+		if quad.ObjectId != c.Quad[i].ObjectId {
+			t.Fatal("bad object id")
+		}
+		if fmt.Sprintf("%v", quad.ObjectVal) != fmt.Sprintf("%v", c.Quad[i].ObjectVal) {
+			t.Fatal("bad object val")
+		}
 	}
-	w.Flush()
 }
 
 func Test1(t *testing.T) {
@@ -95,18 +108,24 @@ func Test1(t *testing.T) {
 		}},
 	}
 
-	w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-	fmt.Fprintf(w, "subj\tpred\to_id\to_val\n")
-	fmt.Fprintf(w, "----\t----\t-----\t----\n")
 	quads, err := Parse([]byte(c.Json))
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, quad := range quads {
-		fmt.Fprintf(w, "%s\t%s\t%s\t%v\n",
-			quad.Subject, quad.Predicate, quad.ObjectId, quad.ObjectVal)
+	for i, quad := range quads {
+		if quad.Subject != c.Quad[i].Subject {
+			t.Fatal("bad subject")
+		}
+		if quad.Predicate != c.Quad[i].Predicate {
+			t.Fatal("bad predicate")
+		}
+		if quad.ObjectId != c.Quad[i].ObjectId {
+			t.Fatal("bad object id")
+		}
+		if fmt.Sprintf("%v", quad.ObjectVal) != fmt.Sprintf("%v", c.Quad[i].ObjectVal) {
+			t.Fatal("bad object val")
+		}
 	}
-	w.Flush()
 }
 
 func Test2(t *testing.T) {
@@ -134,18 +153,24 @@ func Test2(t *testing.T) {
 		}},
 	}
 
-	w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-	fmt.Fprintf(w, "subj\tpred\to_id\to_val\n")
-	fmt.Fprintf(w, "----\t----\t-----\t----\n")
 	quads, err := Parse([]byte(c.Json))
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, quad := range quads {
-		fmt.Fprintf(w, "%s\t%s\t%s\t%v\n",
-			quad.Subject, quad.Predicate, quad.ObjectId, quad.ObjectVal)
+	for i, quad := range quads {
+		if quad.Subject != c.Quad[i].Subject {
+			t.Fatal("bad subject")
+		}
+		if quad.Predicate != c.Quad[i].Predicate {
+			t.Fatal("bad predicate")
+		}
+		if quad.ObjectId != c.Quad[i].ObjectId {
+			t.Fatal("bad object id")
+		}
+		if fmt.Sprintf("%v", quad.ObjectVal) != fmt.Sprintf("%v", c.Quad[i].ObjectVal) {
+			t.Fatal("bad object val")
+		}
 	}
-	w.Flush()
 }
 
 func Test3(t *testing.T) {
@@ -168,18 +193,24 @@ func Test3(t *testing.T) {
 		},
 	}
 
-	w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-	fmt.Fprintf(w, "subj\tpred\to_id\to_val\n")
-	fmt.Fprintf(w, "----\t----\t-----\t----\n")
 	quads, err := Parse([]byte(c.Json))
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, quad := range quads {
-		fmt.Fprintf(w, "%s\t%s\t%s\t%v\n",
-			quad.Subject, quad.Predicate, quad.ObjectId, quad.ObjectVal)
+	for i, quad := range quads {
+		if quad.Subject != c.Quad[i].Subject {
+			t.Fatal("bad subject")
+		}
+		if quad.Predicate != c.Quad[i].Predicate {
+			t.Fatal("bad predicate")
+		}
+		if quad.ObjectId != c.Quad[i].ObjectId {
+			t.Fatal("bad object id")
+		}
+		if fmt.Sprintf("%v", quad.ObjectVal) != fmt.Sprintf("%v", c.Quad[i].ObjectVal) {
+			t.Fatal("bad object val")
+		}
 	}
-	w.Flush()
 }
 
 func Test4(t *testing.T) {
@@ -201,18 +232,24 @@ func Test4(t *testing.T) {
 		},
 	}
 
-	w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-	fmt.Fprintf(w, "subj\tpred\to_id\to_val\n")
-	fmt.Fprintf(w, "----\t----\t-----\t----\n")
 	quads, err := Parse([]byte(c.Json))
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, quad := range quads {
-		fmt.Fprintf(w, "%s\t%s\t%s\t%v\n",
-			quad.Subject, quad.Predicate, quad.ObjectId, quad.ObjectVal)
+	for i, quad := range quads {
+		if quad.Subject != c.Quad[i].Subject {
+			t.Fatal("bad subject")
+		}
+		if quad.Predicate != c.Quad[i].Predicate {
+			t.Fatal("bad predicate")
+		}
+		if quad.ObjectId != c.Quad[i].ObjectId {
+			t.Fatal("bad object id")
+		}
+		if fmt.Sprintf("%v", quad.ObjectVal) != fmt.Sprintf("%v", c.Quad[i].ObjectVal) {
+			t.Fatal("bad object val")
+		}
 	}
-	w.Flush()
 }
 
 func Test5(t *testing.T) {

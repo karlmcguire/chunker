@@ -16,8 +16,8 @@ const (
 	SCALAR
 	OBJECT
 	ARRAY
-	ARRAY_SCALAR
 	UID
+	GEO
 )
 
 func (s ParserState) String() string {
@@ -32,10 +32,10 @@ func (s ParserState) String() string {
 		return "OBJECT"
 	case ARRAY:
 		return "ARRAY"
-	case ARRAY_SCALAR:
-		return "ARRAY_SCALAR"
 	case UID:
 		return "UID"
+	case GEO:
+		return "GEO"
 	}
 	return "?"
 }
@@ -87,14 +87,11 @@ type Level struct {
 	Uid  string
 }
 
-func NewLevel(t ParserState) *Level {
-	if t == OBJECT {
-		uidCounter++
-	}
+func NewLevel(t ParserState, c uint64) *Level {
 	return &Level{
 		Type: t,
 		Uids: make([]string, 0),
-		Uid:  fmt.Sprintf("c.%d", uidCounter),
+		Uid:  fmt.Sprintf("c.%d", c),
 	}
 }
 
@@ -106,7 +103,8 @@ func (l *Level) Subject() string {
 }
 
 type Depth struct {
-	Levels []*Level
+	Counter uint64
+	Levels  []*Level
 }
 
 func NewDepth() *Depth {
@@ -140,7 +138,10 @@ func (d *Depth) Subject() string {
 }
 
 func (d *Depth) Increase(t ParserState) {
-	d.Levels = append(d.Levels, NewLevel(t))
+	if t == OBJECT {
+		d.Counter++
+	}
+	d.Levels = append(d.Levels, NewLevel(t, d.Counter))
 }
 
 func (d *Depth) Decrease(t ParserState) *Level {
@@ -206,7 +207,7 @@ func (p *Parser) Scan(c, n json.Tag, i json.Iter) (done bool, err error) {
 		return
 	}
 
-	//defer p.Log(c, n)
+	defer p.Log(c, n)
 	switch c {
 
 	case json.TagString:
@@ -227,6 +228,7 @@ func (p *Parser) Scan(c, n json.Tag, i json.Iter) (done bool, err error) {
 				case "uid":
 					p.State = UID
 				case "type":
+					p.State = GEO
 				default:
 					p.State = SCALAR
 				}
@@ -237,10 +239,6 @@ func (p *Parser) Scan(c, n json.Tag, i json.Iter) (done bool, err error) {
 			if err = p.FoundValue(i.String()); err != nil {
 				return
 			}
-
-		case ARRAY_SCALAR:
-			// TODO: handle string values within arrays, how do those become
-			//       quads?
 
 		case UID:
 			p.State = PREDICATE
@@ -256,8 +254,6 @@ func (p *Parser) Scan(c, n json.Tag, i json.Iter) (done bool, err error) {
 			if err = p.FoundValue(i.Float()); err != nil {
 				return
 			}
-		case ARRAY_SCALAR:
-			// TODO: might need to handle arrays like this for geo objects
 		}
 
 	case json.TagUint, json.TagInteger:
@@ -267,8 +263,6 @@ func (p *Parser) Scan(c, n json.Tag, i json.Iter) (done bool, err error) {
 			if err = p.FoundValue(i.Int()); err != nil {
 				return
 			}
-		case ARRAY_SCALAR:
-			// TODO: might need to handle arrays like this for geo objects
 		}
 
 	case json.TagBoolFalse, json.TagBoolTrue:
@@ -278,8 +272,6 @@ func (p *Parser) Scan(c, n json.Tag, i json.Iter) (done bool, err error) {
 			if err = p.FoundValue(i.Bool()); err != nil {
 				return
 			}
-		case ARRAY_SCALAR:
-			// TODO: might need to handle arrays like this for geo objects
 		}
 
 	case json.TagObjectStart:
@@ -304,14 +296,6 @@ func (p *Parser) Scan(c, n json.Tag, i json.Iter) (done bool, err error) {
 			p.Depth.Increase(ARRAY)
 		}
 		switch n {
-		case json.TagString:
-			fallthrough
-		case json.TagFloat:
-			fallthrough
-		case json.TagUint, json.TagInteger:
-			fallthrough
-		case json.TagBoolFalse, json.TagBoolTrue:
-			p.State = ARRAY_SCALAR
 		case json.TagObjectStart:
 			p.State = OBJECT
 		case json.TagArrayStart:
