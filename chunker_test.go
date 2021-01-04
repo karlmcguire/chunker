@@ -37,6 +37,8 @@ func Test1(t *testing.T) {
 		fmt.Fprintf(w, "%s\t%s\t%s\t%v\n",
 			quad.Subject, quad.Predicate, quad.ObjectId, quad.ObjectVal)
 	}
+
+	fmt.Println()
 }
 
 // NOTE: 2.4M nquads/sec on thinkpad x1 carbon with zero allocations--this is

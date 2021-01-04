@@ -209,19 +209,22 @@ func (p *Parser) String(l uint64) string {
 	return s
 }
 
-func (p *Parser) Log(i int, c uint64) {
+func (p *Parser) Log(i int, c uint64, n byte) {
 	switch byte(c >> 56) {
 	case 'r', 'n', 't', 'f', 'l', 'u', 'd', '"', '[', ']', '{', '}':
-		fmt.Printf("%2d: %c", i, c>>56)
+		fmt.Printf("%2d: %c %c %s\n", i, c>>56, n, p.State)
 	default:
 	}
 }
 
-func (p *Parser) LogNext(c byte) {
-	fmt.Printf(" %c %s %s\n", c, p.Depth, p.State)
+func log(s string) {
+	fmt.Printf("\n        %s\n\n", s)
 }
 
 func (p *Parser) Walk() (err error) {
+	s := ""
+	n := byte('n')
+
 	for i := 0; i < len(p.Parsed.Tape)-1; i++ {
 		if p.Skip {
 			p.Skip = false
@@ -229,26 +232,26 @@ func (p *Parser) Walk() (err error) {
 		}
 		// c is the current node on the tape
 		c := p.Parsed.Tape[i]
-		p.Log(i, c)
 
 		switch byte(c >> 56) {
 
 		// string
 		case '"':
-			s := p.String(p.Parsed.Tape[i+1])
-			n := byte(p.Parsed.Tape[i+2] >> 56)
+			s = p.String(p.Parsed.Tape[i+1])
+			n = byte(p.Parsed.Tape[i+2] >> 56)
 
 			switch p.State {
 			case PREDICATE:
 				p.FoundPredicate(s)
-
 				switch n {
 				case '{':
 					p.State = OBJECT
 					p.FoundSubject(OBJECT, p.Depth.Subject())
+					log(fmt.Sprintf("at %d we found an object!", i))
 				case '[':
 					p.State = ARRAY
 					p.FoundSubject(ARRAY, p.Depth.Subject())
+					log(fmt.Sprintf("at %d we found an object!", i))
 				default:
 					switch p.Quad.Predicate {
 					case "uid":
@@ -259,6 +262,7 @@ func (p *Parser) Walk() (err error) {
 						p.State = SCALAR
 					}
 				}
+
 			case SCALAR:
 				p.State = PREDICATE
 				p.FoundValue(s)
@@ -271,11 +275,9 @@ func (p *Parser) Walk() (err error) {
 				// TODO:
 			}
 
-			p.LogNext(n)
-
 		// array open
 		case '[':
-			n := byte(p.Parsed.Tape[i+1] >> 56)
+			n = byte(p.Parsed.Tape[i+1] >> 56)
 			if n != ']' {
 				p.Depth.Increase(ARRAY)
 			}
@@ -293,11 +295,9 @@ func (p *Parser) Walk() (err error) {
 				p.State = SCALAR
 			}
 
-			p.LogNext(n)
-
 		// array close
 		case ']':
-			n := byte(p.Parsed.Tape[i+1] >> 56)
+			n = byte(p.Parsed.Tape[i+1] >> 56)
 
 			if !p.Queue.Empty() {
 				if waiting := p.Queue.Pop(ARRAY); waiting != nil {
@@ -321,11 +321,9 @@ func (p *Parser) Walk() (err error) {
 				p.State = PREDICATE
 			}
 
-			p.LogNext(n)
-
 		// object open
 		case '{':
-			n := byte(p.Parsed.Tape[i+1] >> 56)
+			n = byte(p.Parsed.Tape[i+1] >> 56)
 			if n != '}' {
 				p.Depth.Increase(OBJECT)
 			}
@@ -343,11 +341,9 @@ func (p *Parser) Walk() (err error) {
 				p.State = PREDICATE
 			}
 
-			p.LogNext(n)
-
 		// object close
 		case '}':
-			n := byte(p.Parsed.Tape[i+1] >> 56)
+			n = byte(p.Parsed.Tape[i+1] >> 56)
 			if p.Depth.ArrayObject() {
 				p.Depth.ArrayUid(p.Depth.Subject())
 			}
@@ -369,11 +365,9 @@ func (p *Parser) Walk() (err error) {
 				p.State = PREDICATE
 			}
 
-			p.LogNext(n)
-
 		// root
 		case 'r':
-			n := byte(p.Parsed.Tape[i+1] >> 56)
+			n = byte(p.Parsed.Tape[i+1] >> 56)
 
 			switch n {
 			case '{':
@@ -382,16 +376,13 @@ func (p *Parser) Walk() (err error) {
 				p.State = ARRAY
 			}
 
-			p.LogNext(n)
-
 		// null
 		case 'n':
-			n := byte(p.Parsed.Tape[i+1] >> 56)
-			p.LogNext(n)
+			n = byte(p.Parsed.Tape[i+1] >> 56)
 
 		// true
 		case 't':
-			n := byte(p.Parsed.Tape[i+1] >> 56)
+			n = byte(p.Parsed.Tape[i+1] >> 56)
 
 			switch p.State {
 			case SCALAR:
@@ -399,11 +390,9 @@ func (p *Parser) Walk() (err error) {
 				p.FoundValue(true)
 			}
 
-			p.LogNext(n)
-
 		// false
 		case 'f':
-			n := byte(p.Parsed.Tape[i+1] >> 56)
+			n = byte(p.Parsed.Tape[i+1] >> 56)
 
 			switch p.State {
 			case SCALAR:
@@ -411,23 +400,19 @@ func (p *Parser) Walk() (err error) {
 				p.FoundValue(false)
 			}
 
-			p.LogNext(n)
-
 		// int64
 		case 'l':
-			n := byte(p.Parsed.Tape[i+1] >> 56)
+			n = byte(p.Parsed.Tape[i+1] >> 56)
 
 			switch p.State {
 			case SCALAR:
 				p.State = PREDICATE
 				p.FoundValue(n)
 			}
-
-			p.LogNext(n)
 
 		// uint64
 		case 'u':
-			n := byte(p.Parsed.Tape[i+1] >> 56)
+			n = byte(p.Parsed.Tape[i+1] >> 56)
 
 			switch p.State {
 			case SCALAR:
@@ -435,12 +420,10 @@ func (p *Parser) Walk() (err error) {
 				// TODO: convert from tape
 				p.FoundValue(n)
 			}
-
-			p.LogNext(n)
 
 		// float64
 		case 'd':
-			n := byte(p.Parsed.Tape[i+1] >> 56)
+			n = byte(p.Parsed.Tape[i+1] >> 56)
 
 			switch p.State {
 			case SCALAR:
@@ -448,9 +431,9 @@ func (p *Parser) Walk() (err error) {
 				// TODO: convert from tape
 				p.FoundValue(n)
 			}
-
-			p.LogNext(n)
 		}
+
+		p.Log(i, c, n)
 	}
 	return
 }
