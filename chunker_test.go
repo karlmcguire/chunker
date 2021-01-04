@@ -39,6 +39,8 @@ func Test1(t *testing.T) {
 	}
 }
 
+// NOTE: 2.4M nquads/sec on thinkpad x1 carbon with zero allocations--this is
+//       probably the upper limit on performance
 func Benchmark1(b *testing.B) {
 	json := []byte(`[
 	{
