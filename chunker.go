@@ -226,12 +226,15 @@ func (p *Parser) Walk() (err error) {
 	n := byte('n')
 
 	for i := 0; i < len(p.Parsed.Tape)-1; i++ {
+		// c is the current node on the tape
+		c := p.Parsed.Tape[i]
+
+		// skip over things like {} and []
 		if p.Skip {
+			p.Log(i, c, 0)
 			p.Skip = false
 			continue
 		}
-		// c is the current node on the tape
-		c := p.Parsed.Tape[i]
 
 		switch byte(c >> 56) {
 
@@ -247,11 +250,9 @@ func (p *Parser) Walk() (err error) {
 				case '{':
 					p.State = OBJECT
 					p.FoundSubject(OBJECT, p.Depth.Subject())
-					log(fmt.Sprintf("at %d we found an object!", i))
 				case '[':
 					p.State = ARRAY
 					p.FoundSubject(ARRAY, p.Depth.Subject())
-					log(fmt.Sprintf("at %d we found an object!", i))
 				default:
 					switch p.Quad.Predicate {
 					case "uid":
@@ -327,6 +328,8 @@ func (p *Parser) Walk() (err error) {
 			if n != '}' {
 				p.Depth.Increase(OBJECT)
 			}
+
+			log(fmt.Sprintf("closing bracket at %d", (c<<8)>>8-1))
 
 			switch n {
 			case '{':
