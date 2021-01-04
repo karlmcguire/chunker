@@ -307,6 +307,7 @@ func (p *Parser) Scan(c, n json.Tag, i json.Iter) (done bool, err error) {
 				p.State = GEO_COORDS
 				p.Queue.Latest().Type = GEO
 				p.Queue.Latest().Quad.Subject = p.Depth.Down().Uid
+
 			} else {
 				p.State = PREDICATE
 			}
@@ -449,7 +450,7 @@ func (p *Parser) Scan(c, n json.Tag, i json.Iter) (done bool, err error) {
 			p.State = OBJECT
 		}
 
-	case json.TagNull: // TODO
+	case json.TagNull:
 	case json.TagRoot:
 		switch n {
 		case json.TagObjectStart:
