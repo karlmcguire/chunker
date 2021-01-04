@@ -2,9 +2,7 @@ package chunker
 
 import (
 	"fmt"
-	"os"
 	"testing"
-	"text/tabwriter"
 )
 
 type Case struct {
@@ -33,22 +31,15 @@ func TestGeo(t *testing.T) {
 			{"c.1", "age", "", 26},
 			{"c.1", "married", "", true},
 			{"c.1", "now", "", "2020-12-29T17:39:34.816808024Z"},
-			{"c.1", "address", "", "geoval"}, // TODO: geoval parsing
+			{"c.1", "address", "", "[1.1 2]"},
 		},
 	}
-
-	w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-	fmt.Fprintf(w, "subj\tpred\to_id\to_val\n")
-	fmt.Fprintf(w, "----\t----\t-----\t----\n")
-	defer w.Flush()
 
 	quads, err := Parse([]byte(c.Json))
 	if err != nil {
 		t.Fatal(err)
 	}
 	for i, quad := range quads {
-		fmt.Fprintf(w, "%s\t%s\t%s\t%v\n",
-			quad.Subject, quad.Predicate, quad.ObjectId, quad.ObjectVal)
 		if quad.Subject != c.Quad[i].Subject {
 			t.Fatal("bad subject")
 		}

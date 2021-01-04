@@ -6,8 +6,6 @@ import (
 	json "github.com/minio/simdjson-go"
 )
 
-var uidCounter = 0
-
 type ParserState uint8
 
 const (
@@ -18,6 +16,7 @@ const (
 	ARRAY
 	UID
 	GEO
+	GEO_COORDS
 )
 
 func (s ParserState) String() string {
@@ -36,15 +35,58 @@ func (s ParserState) String() string {
 		return "UID"
 	case GEO:
 		return "GEO"
+	case GEO_COORDS:
+		return "GEO_COORDS"
 	}
 	return "?"
+}
+
+type Geo struct {
+	Type        string
+	Coordinates []float64
+}
+
+func NewGeo() *Geo {
+	return &Geo{
+		Coordinates: make([]float64, 0),
+	}
+}
+
+func (g *Geo) FoundType(t string) bool {
+	switch t {
+	case "Point":
+		fallthrough
+	case "MultiPoint":
+		fallthrough
+	case "LineString":
+		fallthrough
+	case "MultiLineString":
+		fallthrough
+	case "Polygon":
+		fallthrough
+	case "MultiPolygon":
+		fallthrough
+	case "GeometryCollection":
+		g.Type = t
+		return true
+	}
+	return false
+}
+
+func (g *Geo) FoundCoordinate(c interface{}, err error) error {
+	switch n := c.(type) {
+	case float64:
+		g.Coordinates = append(g.Coordinates, n)
+	case int64:
+		g.Coordinates = append(g.Coordinates, float64(n))
+	}
+	return err
 }
 
 type (
 	Queue struct {
 		Waiting []*QueueQuad
 	}
-
 	QueueQuad struct {
 		Type ParserState
 		Quad *Quad
@@ -59,6 +101,10 @@ func NewQueue() *Queue {
 
 func (q *Queue) Recent(t ParserState) bool {
 	return q.Waiting[len(q.Waiting)-1].Type == t
+}
+
+func (q *Queue) Latest() *QueueQuad {
+	return q.Waiting[len(q.Waiting)-1]
 }
 
 func (q *Queue) Pop(t ParserState) *Quad {
@@ -111,6 +157,10 @@ func NewDepth() *Depth {
 	return &Depth{
 		Levels: make([]*Level, 0),
 	}
+}
+
+func (d *Depth) Down() *Level {
+	return d.Levels[len(d.Levels)-2]
 }
 
 func (d *Depth) ArrayObject() bool {
@@ -169,6 +219,7 @@ type Parser struct {
 	Quads []*Quad
 	Queue *Queue
 	Depth *Depth
+	Geo   *Geo
 	Quad  *Quad
 	Skip  bool
 }
@@ -179,12 +230,13 @@ func NewParser() *Parser {
 		Quads: make([]*Quad, 0),
 		Depth: NewDepth(),
 		Queue: NewQueue(),
+		Geo:   NewGeo(),
 		Quad:  &Quad{},
 	}
 }
 
 // Parse reads from the iterator until an error is raised or we reach the end of
-// the tape, returning Quads.
+// the tape.
 func (p *Parser) Parse(iter json.Iter) ([]*Quad, error) {
 	var err error
 	for done := false; !done; {
@@ -207,7 +259,7 @@ func (p *Parser) Scan(c, n json.Tag, i json.Iter) (done bool, err error) {
 		return
 	}
 
-	defer p.Log(c, n)
+	//defer p.Log(c, n)
 	switch c {
 
 	case json.TagString:
@@ -245,6 +297,29 @@ func (p *Parser) Scan(c, n json.Tag, i json.Iter) (done bool, err error) {
 			if err = p.FoundUid(i.String()); err != nil {
 				return
 			}
+
+		case GEO:
+			var s string
+			if s, err = i.String(); err != nil {
+				return
+			}
+			if p.Geo.FoundType(s) {
+				p.State = GEO_COORDS
+				p.Queue.Latest().Type = GEO
+				p.Queue.Latest().Quad.Subject = p.Depth.Down().Uid
+			} else {
+				p.State = PREDICATE
+			}
+
+		case GEO_COORDS:
+			var s string
+			if s, err = i.String(); err != nil {
+				return
+			}
+			if s != "coordinates" {
+				// TODO: handle non-geo objects that just *look* like geo
+				//       objects... as regular objects
+			}
 		}
 
 	case json.TagFloat:
@@ -254,6 +329,10 @@ func (p *Parser) Scan(c, n json.Tag, i json.Iter) (done bool, err error) {
 			if err = p.FoundValue(i.Float()); err != nil {
 				return
 			}
+		case GEO_COORDS:
+			if err = p.Geo.FoundCoordinate(i.Float()); err != nil {
+				return
+			}
 		}
 
 	case json.TagUint, json.TagInteger:
@@ -261,6 +340,10 @@ func (p *Parser) Scan(c, n json.Tag, i json.Iter) (done bool, err error) {
 		case SCALAR:
 			p.State = PREDICATE
 			if err = p.FoundValue(i.Int()); err != nil {
+				return
+			}
+		case GEO_COORDS:
+			if err = p.Geo.FoundCoordinate(i.Int()); err != nil {
 				return
 			}
 		}
@@ -332,6 +415,15 @@ func (p *Parser) Scan(c, n json.Tag, i json.Iter) (done bool, err error) {
 		}
 
 	case json.TagArrayEnd:
+		if p.State == GEO_COORDS {
+			if waiting := p.Queue.Pop(GEO); waiting != nil {
+				p.Quads = append(p.Quads, &Quad{
+					Subject:   waiting.Subject,
+					Predicate: waiting.Predicate,
+					ObjectVal: fmt.Sprintf("%v", p.Geo.Coordinates),
+				})
+			}
+		}
 		if !p.Queue.Empty() {
 			if waiting := p.Queue.Pop(ARRAY); waiting != nil {
 				uids := p.Depth.Decrease(ARRAY).Uids
