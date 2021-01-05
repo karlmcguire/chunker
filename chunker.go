@@ -3,6 +3,7 @@ package chunker
 import (
 	"fmt"
 	"math"
+	"strings"
 
 	json "github.com/minio/simdjson-go"
 )
@@ -37,8 +38,8 @@ type Facet struct {
 	Key     string
 	Value   []byte
 	ValType FacetType
-	Tokens  []string
-	Alias   string
+	//Tokens  []string
+	//Alias   string
 }
 
 type Quad struct {
@@ -284,12 +285,22 @@ func (p *Parser) Walk() (err error) {
 			// p.String grabs the string value from the string buffer and
 			// increments p.stringOffset to account for the length
 			s := p.String(p.Parsed.Tape[i+1])
+
 			// n is the next node type
 			n = byte(p.Parsed.Tape[i+2] >> 56)
 
 			switch p.State {
 			case PREDICATE:
 				p.FoundPredicate(s)
+
+				// might be a facet
+				if strings.Contains(s, "|") {
+					name := strings.Split(s, "|")
+					if len(name) == 2 {
+						p.LogMore(fmt.Sprintf("found facet %s", name[1]))
+					}
+				}
+
 				switch n {
 				case '{':
 					p.State = OBJECT
@@ -367,6 +378,9 @@ func (p *Parser) Walk() (err error) {
 							Subject:   p.Depth.Subject(),
 							Predicate: waiting.Predicate,
 							ObjectId:  uid,
+							// we need this incase we find a facet for this
+							// predicate later in the file, then we can append
+							Facets: make([]*Facet, 0),
 						})
 					}
 				}
@@ -416,6 +430,9 @@ func (p *Parser) Walk() (err error) {
 						Subject:   p.Depth.Subject(),
 						Predicate: waiting.Predicate,
 						ObjectId:  objectId,
+						// we need this incase we find a facet for this
+						// predicate later in the file, then we can append
+						Facets: make([]*Facet, 0),
 					})
 				}
 			}

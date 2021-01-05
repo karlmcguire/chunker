@@ -100,6 +100,21 @@ func Test1(t *testing.T) {
 }
 
 func TestFacets1(t *testing.T) {
+	/*
+		TODO: this is the correct output, the case should match this:
+
+		(subject:"_:dg.1417165956.1" predicate:"mobile" object_value:<str_val:"040123456" >
+		    facets:<key:"operation" value:"READ WRITE" tokens:"\001read" tokens:"\001write" > )
+
+		(subject:"_:dg.1417165956.1" predicate:"car" object_value:<str_val:"MA0123" >
+		    facets:<key:"age" value:"\003\000\000\000\000\000\000\000" val_type:INT >
+		    facets:<key:"price" value:"q=\n\327#L\335@" val_type:FLOAT >
+		    facets:<key:"since" value:"\001\000\000\000\016\273K7\345\000\000\000\000\377\377" val_type:DATETIME >
+		    facets:<key:"first" value:"\001" val_type:BOOL > ),
+
+		(subject:"_:dg.1417165956.1" predicate:"name" object_value:<str_val:"Alice" > )
+	*/
+
 	c := &Case{
 		Json: []byte(`[{
 			"name": "Alice",
@@ -111,7 +126,44 @@ func TestFacets1(t *testing.T) {
 			"car|price": 30000.56,
 			"car|since": "2006-01-02T15:04:05Z"
 		}]`),
-		Quads: []*Quad{},
+		Quads: []*Quad{{
+			Subject:   "c.1",
+			Predicate: "name",
+			ObjectId:  "",
+			ObjectVal: "Alice",
+		}, {
+			Subject:   "c.1",
+			Predicate: "mobile",
+			ObjectId:  "",
+			ObjectVal: "040123456",
+			Facets: []*Facet{{
+				Key:     "operation",
+				Value:   []byte(`READ WRITE`),
+				ValType: STRING,
+			}},
+		}, {
+			Subject:   "c.1",
+			Predicate: "car",
+			ObjectId:  "",
+			ObjectVal: "MA0123",
+			Facets: []*Facet{{
+				Key:     "age",
+				Value:   []byte{0x03},
+				ValType: INT,
+			}, {
+				Key:     "price",
+				Value:   []byte{},
+				ValType: FLOAT,
+			}, {
+				Key:     "since",
+				Value:   []byte{},
+				ValType: DATETIME,
+			}, {
+				Key:     "first",
+				Value:   []byte{0x01},
+				ValType: BOOL,
+			}},
+		}},
 	}
 	c.Test(t, true)
 }
