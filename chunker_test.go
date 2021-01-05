@@ -13,7 +13,7 @@ type Case struct {
 }
 
 func (c *Case) Test(t *testing.T, logs bool) {
-	quads, err := NewParser(logs).Parse(c.Json)
+	quads, _, err := NewParser(logs).Parse(c.Json)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -97,6 +97,23 @@ func Test1(t *testing.T) {
 		}},
 	}
 	c.Test(t, false)
+}
+
+func TestFacets1(t *testing.T) {
+	c := &Case{
+		Json: []byte(`[{
+			"name": "Alice",
+			"mobile": "040123456",
+			"car": "MA0123",
+			"mobile|operation": "READ WRITE",
+			"car|first": true,
+			"car|age": 3,
+			"car|price": 30000.56,
+			"car|since": "2006-01-02T15:04:05Z"
+		}]`),
+		Quads: []*Quad{},
+	}
+	c.Test(t, true)
 }
 
 func Test2(t *testing.T) {
@@ -266,34 +283,34 @@ func Test5(t *testing.T) {
 		  }
 		]`),
 		Quads: []*Quad{
-			{"c.1", "name", "", "A"},
-			{"c.1", "age", "", 25},
-			{"c.2", "name", "", "A1"},
-			{"c.3", "name", "", "A11"},
-			{"c.4", "name", "", "A12"},
-			{"c.2", "friends", "c.3", nil},
-			{"c.2", "friends", "c.4", nil},
-			{"c.5", "name", "", "A2"},
-			{"c.6", "name", "", "A21"},
-			{"c.7", "name", "", "A22"},
-			{"c.5", "friends", "c.6", nil},
-			{"c.5", "friends", "c.7", nil},
-			{"c.1", "friends", "c.2", nil},
-			{"c.1", "friends", "c.5", nil},
-			{"c.8", "name", "", "B"},
-			{"c.8", "age", "", 26},
-			{"c.9", "name", "", "B1"},
-			{"c.10", "name", "", "B11"},
-			{"c.11", "name", "", "B12"},
-			{"c.9", "friends", "c.10", nil},
-			{"c.9", "friends", "c.11", nil},
-			{"c.12", "name", "", "B2"},
-			{"c.13", "name", "", "B21"},
-			{"c.14", "name", "", "B22"},
-			{"c.12", "friends", "c.13", nil},
-			{"c.12", "friends", "c.14", nil},
-			{"c.8", "friends", "c.9", nil},
-			{"c.8", "friends", "c.12", nil},
+			{"c.1", "name", "", "A", nil},
+			{"c.1", "age", "", 25, nil},
+			{"c.2", "name", "", "A1", nil},
+			{"c.3", "name", "", "A11", nil},
+			{"c.4", "name", "", "A12", nil},
+			{"c.2", "friends", "c.3", nil, nil},
+			{"c.2", "friends", "c.4", nil, nil},
+			{"c.5", "name", "", "A2", nil},
+			{"c.6", "name", "", "A21", nil},
+			{"c.7", "name", "", "A22", nil},
+			{"c.5", "friends", "c.6", nil, nil},
+			{"c.5", "friends", "c.7", nil, nil},
+			{"c.1", "friends", "c.2", nil, nil},
+			{"c.1", "friends", "c.5", nil, nil},
+			{"c.8", "name", "", "B", nil},
+			{"c.8", "age", "", 26, nil},
+			{"c.9", "name", "", "B1", nil},
+			{"c.10", "name", "", "B11", nil},
+			{"c.11", "name", "", "B12", nil},
+			{"c.9", "friends", "c.10", nil, nil},
+			{"c.9", "friends", "c.11", nil, nil},
+			{"c.12", "name", "", "B2", nil},
+			{"c.13", "name", "", "B21", nil},
+			{"c.14", "name", "", "B22", nil},
+			{"c.12", "friends", "c.13", nil, nil},
+			{"c.12", "friends", "c.14", nil, nil},
+			{"c.8", "friends", "c.9", nil, nil},
+			{"c.8", "friends", "c.12", nil, nil},
 		},
 	}
 	c.Test(t, false)

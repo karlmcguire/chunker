@@ -7,11 +7,52 @@ import (
 	json "github.com/minio/simdjson-go"
 )
 
+type FacetType uint8
+
+const (
+	STRING FacetType = iota
+	INT
+	FLOAT
+	BOOL
+	DATETIME
+)
+
+func (t FacetType) String() string {
+	switch t {
+	case STRING:
+		return "STRING"
+	case INT:
+		return "INT"
+	case FLOAT:
+		return "FLOAT"
+	case BOOL:
+		return "BOOL"
+	case DATETIME:
+		return "DATETIME"
+	}
+	return "?"
+}
+
+type Facet struct {
+	Key     string
+	Value   []byte
+	ValType FacetType
+	Tokens  []string
+	Alias   string
+}
+
 type Quad struct {
 	Subject   string
 	Predicate string
 	ObjectId  string
 	ObjectVal interface{}
+	Facets    []*Facet
+}
+
+func NewQuad() *Quad {
+	return &Quad{
+		Facets: make([]*Facet, 0),
+	}
 }
 
 type ParserState uint8
@@ -169,6 +210,7 @@ type Parser struct {
 	State  ParserState
 	Parsed *json.ParsedJson
 	Quads  []*Quad
+	Facets []*Facet
 	Queue  *Queue
 	Depth  *Depth
 	Quad   *Quad
@@ -180,21 +222,22 @@ type Parser struct {
 
 func NewParser(logs bool) *Parser {
 	return &Parser{
-		State: NONE,
-		Quads: make([]*Quad, 0),
-		Quad:  &Quad{},
-		Queue: NewQueue(),
-		Depth: NewDepth(),
-		Logs:  logs,
+		State:  NONE,
+		Quads:  make([]*Quad, 0),
+		Facets: make([]*Facet, 0),
+		Quad:   &Quad{},
+		Queue:  NewQueue(),
+		Depth:  NewDepth(),
+		Logs:   logs,
 	}
 }
 
-func (p *Parser) Parse(d []byte) ([]*Quad, error) {
+func (p *Parser) Parse(d []byte) ([]*Quad, []*Facet, error) {
 	var err error
 	if p.Parsed, err = json.Parse(d, nil); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	return p.Quads, p.Walk()
+	return p.Quads, p.Facets, p.Walk()
 }
 
 func (p *Parser) String(l uint64) string {
@@ -460,12 +503,12 @@ func (p *Parser) Walk() (err error) {
 
 func (p *Parser) FoundUid(s string) {
 	p.Depth.Uid(s)
-	p.Quad = &Quad{}
+	p.Quad = NewQuad()
 }
 
 func (p *Parser) FoundSubject(t ParserState, s string) {
 	p.Queue.Add(t, p.Quad)
-	p.Quad = &Quad{}
+	p.Quad = NewQuad()
 }
 
 func (p *Parser) FoundPredicate(s string) {
@@ -476,5 +519,5 @@ func (p *Parser) FoundValue(v interface{}) {
 	p.Quad.Subject = p.Depth.Subject()
 	p.Quad.ObjectVal = v
 	p.Quads = append(p.Quads, p.Quad)
-	p.Quad = &Quad{}
+	p.Quad = NewQuad()
 }
