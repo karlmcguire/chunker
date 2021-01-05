@@ -1,6 +1,7 @@
 package chunker
 
 import (
+	"encoding/binary"
 	"fmt"
 	"math"
 	"strings"
@@ -35,6 +36,7 @@ func (t FacetType) String() string {
 }
 
 type Facet struct {
+	Pred    string
 	Key     string
 	Value   []byte
 	ValType FacetType
@@ -64,6 +66,9 @@ const (
 	SCALAR
 	OBJECT
 	ARRAY
+	FACET
+	FACET_SCALAR
+	FACET_MAP
 	UID
 	GEO
 )
@@ -80,6 +85,12 @@ func (s ParserState) String() string {
 		return "OBJECT"
 	case ARRAY:
 		return "ARRAY"
+	case FACET:
+		return "FACET"
+	case FACET_SCALAR:
+		return "FACET_SCALAR"
+	case FACET_MAP:
+		return "FACET_MAP"
 	case UID:
 		return "UID"
 	case GEO:
@@ -215,6 +226,7 @@ type Parser struct {
 	Queue  *Queue
 	Depth  *Depth
 	Quad   *Quad
+	Facet  *Facet
 	Skip   bool
 	Logs   bool
 
@@ -227,6 +239,7 @@ func NewParser(logs bool) *Parser {
 		Quads:  make([]*Quad, 0),
 		Facets: make([]*Facet, 0),
 		Quad:   &Quad{},
+		Facet:  &Facet{},
 		Queue:  NewQueue(),
 		Depth:  NewDepth(),
 		Logs:   logs,
@@ -293,21 +306,32 @@ func (p *Parser) Walk() (err error) {
 			case PREDICATE:
 				p.FoundPredicate(s)
 
-				// might be a facet
+				var keys []string
 				if strings.Contains(s, "|") {
-					name := strings.Split(s, "|")
-					if len(name) == 2 {
-						p.LogMore(fmt.Sprintf("found facet %s", name[1]))
+					keys = strings.Split(s, "|")
+					if len(keys) == 2 {
+						p.State = FACET
 					}
 				}
 
 				switch n {
 				case '{':
-					p.State = OBJECT
-					p.FoundSubject(OBJECT, p.Depth.Subject())
+					if p.State == FACET {
+						p.State = FACET_MAP
+					} else {
+						p.State = OBJECT
+						p.FoundSubject(OBJECT, p.Depth.Subject())
+					}
 				case '[':
 					p.State = ARRAY
 					p.FoundSubject(ARRAY, p.Depth.Subject())
+				case '"', 't', 'f', 'l', 'u', 'd':
+					if p.State == FACET {
+						p.Quad = NewQuad()
+						p.State = FACET_SCALAR
+						p.Facet.Pred = keys[0]
+						p.Facet.Key = keys[1]
+					}
 				default:
 					switch p.Quad.Predicate {
 					case "uid":
@@ -342,6 +366,10 @@ func (p *Parser) Walk() (err error) {
 					p.LogMore(fmt.Sprintf("skipping %s geo object", s))
 					p.State = PREDICATE
 				}
+
+			case FACET_SCALAR:
+				p.State = PREDICATE
+				p.FoundScalarFacet(s)
 			}
 
 		// array open
@@ -467,6 +495,9 @@ func (p *Parser) Walk() (err error) {
 			case SCALAR:
 				p.State = PREDICATE
 				p.FoundValue(true)
+			case FACET_SCALAR:
+				p.State = PREDICATE
+				p.FoundScalarFacet(true)
 			}
 
 		// false
@@ -477,6 +508,9 @@ func (p *Parser) Walk() (err error) {
 			case SCALAR:
 				p.State = PREDICATE
 				p.FoundValue(false)
+			case FACET_SCALAR:
+				p.State = PREDICATE
+				p.FoundScalarFacet(false)
 			}
 
 		// int64
@@ -488,6 +522,9 @@ func (p *Parser) Walk() (err error) {
 				p.State = PREDICATE
 				// int64 value is stored after the current node (i + 1)
 				p.FoundValue(int64(p.Parsed.Tape[i+1]))
+			case FACET_SCALAR:
+				p.State = PREDICATE
+				p.FoundScalarFacet(p.Parsed.Tape[i+1])
 			}
 
 		// uint64
@@ -499,6 +536,9 @@ func (p *Parser) Walk() (err error) {
 				p.State = PREDICATE
 				// uint64 value is stored after the current node (i + 1)
 				p.FoundValue(p.Parsed.Tape[i+1])
+			case FACET_SCALAR:
+				p.State = PREDICATE
+				p.FoundScalarFacet(p.Parsed.Tape[i+1])
 			}
 
 		// float64
@@ -510,6 +550,9 @@ func (p *Parser) Walk() (err error) {
 				p.State = PREDICATE
 				// float64 value is stored after the current node (i + 1)
 				p.FoundValue(math.Float64frombits(p.Parsed.Tape[i+1]))
+			case FACET_SCALAR:
+				p.State = PREDICATE
+				p.FoundScalarFacet(math.Float64frombits(p.Parsed.Tape[i+1]))
 			}
 		}
 
@@ -537,4 +580,34 @@ func (p *Parser) FoundValue(v interface{}) {
 	p.Quad.ObjectVal = v
 	p.Quads = append(p.Quads, p.Quad)
 	p.Quad = NewQuad()
+}
+
+func (p *Parser) FoundScalarFacet(v interface{}) {
+	switch val := v.(type) {
+	case string:
+		// TODO: handle DATETIME
+		p.Facet.Value = []byte(val)
+	case int64:
+		var b [8]byte
+		binary.LittleEndian.PutUint64(b[:], uint64(val))
+		p.Facet.Value = b[:]
+	case uint64:
+		var b [8]byte
+		binary.LittleEndian.PutUint64(b[:], val)
+		p.Facet.Value = b[:]
+	case bool:
+		b := []byte{0x00}
+		if val {
+			b[0] = 0x01
+		}
+		p.Facet.Value = b
+	}
+	// search quads in reverse order for the facet predicate
+	for i := len(p.Quads) - 1; i > 0; i-- {
+		if p.Quads[i].Predicate == p.Facet.Pred {
+			p.Quads[i].Facets = append(p.Quads[i].Facets, p.Facet)
+			p.Facet = &Facet{}
+			break
+		}
+	}
 }
