@@ -1,6 +1,7 @@
 package chunker
 
 import (
+	"fmt"
 	"testing"
 
 	"github.com/davecgh/go-spew/spew"
@@ -11,46 +12,304 @@ type Case struct {
 	Quads []*Quad
 }
 
-func (c *Case) Test(t *testing.T) {
-	quads, err := NewParser().Parse(c.Json)
+func (c *Case) Test(t *testing.T, logs bool) {
+	quads, err := NewParser(logs).Parse(c.Json)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(quads) != len(c.Quads) {
-		spew.Dump(quads)
 		t.Fatalf("expected %d quads but got %d\n", len(c.Quads), len(quads))
 	}
 	for i, quad := range quads {
 		if quad.Subject != c.Quads[i].Subject {
+			spew.Dump(quad)
 			t.Fatalf("expected '%s' subject for quad %d but got '%s'\n",
 				c.Quads[i].Subject, i, quad.Subject)
 		}
 		if quad.Predicate != c.Quads[i].Predicate {
+			spew.Dump(quad)
 			t.Fatalf("expected '%s' predicate for quad %d but got '%s'\n",
 				c.Quads[i].Predicate, i, quad.Predicate)
 		}
 		if quad.ObjectId != c.Quads[i].ObjectId {
+			spew.Dump(quad)
 			t.Fatalf("expected '%s' objectId for quad %d but got '%s'\n",
 				c.Quads[i].ObjectId, i, quad.ObjectId)
 		}
-		if quad.ObjectVal != c.Quads[i].ObjectVal {
+		// normalize objectVal (sometimes int64s become uint64s, etc)
+		objectVal := fmt.Sprintf("%v", quad.ObjectVal)
+		correctObjectVal := fmt.Sprintf("%v", c.Quads[i].ObjectVal)
+		if objectVal != correctObjectVal {
+			spew.Dump(quad)
 			t.Fatalf("expected '%v' objectVal for quad %d but got '%v'\n",
 				c.Quads[i].ObjectVal, i, quad.ObjectVal)
 		}
 	}
 }
 
-func TestParser(t *testing.T) {
+func Test1(t *testing.T) {
 	c := &Case{
 		Json: []byte(`{
 			"name": "Alice",
+			"address": {},
+			"friend": [
+				{
+					"name": "Charlie",
+					"married": false,
+					"address": {}
+				}, {
+					"uid": "1000",
+					"name": "Bob",
+					"address": {}
+				}
+			]
+		}`),
+		Quads: []*Quad{{
+			Subject:   "c.1",
+			Predicate: "name",
+			ObjectId:  "",
+			ObjectVal: "Alice",
+		}, {
+			Subject:   "c.2",
+			Predicate: "name",
+			ObjectId:  "",
+			ObjectVal: "Charlie",
+		}, {
+			Subject:   "c.2",
+			Predicate: "married",
+			ObjectId:  "",
+			ObjectVal: false,
+		}, {
+			Subject:   "1000",
+			Predicate: "name",
+			ObjectId:  "",
+			ObjectVal: "Bob",
+		}, {
+			Subject:   "c.1",
+			Predicate: "friend",
+			ObjectId:  "c.2",
+			ObjectVal: nil,
+		}, {
+			Subject:   "c.1",
+			Predicate: "friend",
+			ObjectId:  "1000",
+			ObjectVal: nil,
+		}},
+	}
+	c.Test(t, false)
+}
+
+func Test2(t *testing.T) {
+	c := &Case{
+		Json: []byte(`{
+			"name": "Alice",
+			"address": {},
+			"school": {
+				"name": "Wellington Public School"
+			}
+		}`),
+		Quads: []*Quad{{
+			Subject:   "c.1",
+			Predicate: "name",
+			ObjectId:  "",
+			ObjectVal: "Alice",
+		}, {
+			Subject:   "c.2",
+			Predicate: "name",
+			ObjectId:  "",
+			ObjectVal: "Wellington Public School",
+		}, {
+			Subject:   "c.1",
+			Predicate: "school",
+			ObjectId:  "c.2",
+			ObjectVal: nil,
+		}},
+	}
+	c.Test(t, false)
+}
+
+func Test3(t *testing.T) {
+	c := &Case{
+		Json: []byte(`[
+			{
+				"name": "Alice",
+				"mobile": "040123456",
+				"car": "MA0123", 
+				"age": 21, 
+				"weight": 58.7
+			}
+		]`),
+		Quads: []*Quad{{
+			Subject:   "c.1",
+			Predicate: "name",
+			ObjectId:  "",
+			ObjectVal: "Alice",
+		}, {
+			Subject:   "c.1",
+			Predicate: "mobile",
+			ObjectId:  "",
+			ObjectVal: "040123456",
+		}, {
+			Subject:   "c.1",
+			Predicate: "car",
+			ObjectId:  "",
+			ObjectVal: "MA0123",
+		}, {
+			Subject:   "c.1",
+			Predicate: "age",
+			ObjectId:  "",
+			ObjectVal: 21,
+		}, {
+			Subject:   "c.1",
+			Predicate: "weight",
+			ObjectId:  "",
+			ObjectVal: 58.7,
+		}},
+	}
+	c.Test(t, false)
+}
+
+func Test4(t *testing.T) {
+	c := &Case{
+		Json: []byte(`{
+			"name": "Alice",
+			"age": 25,
+			"friends": [
+				{
+					"name": "Bob"
+				}
+			]	
+		}`),
+		Quads: []*Quad{{
+			Subject:   "c.1",
+			Predicate: "name",
+			ObjectId:  "",
+			ObjectVal: "Alice",
+		}, {
+			Subject:   "c.1",
+			Predicate: "age",
+			ObjectId:  "",
+			ObjectVal: 25,
+		}, {
+			Subject:   "c.2",
+			Predicate: "name",
+			ObjectId:  "",
+			ObjectVal: "Bob",
+		}, {
+			Subject:   "c.1",
+			Predicate: "friends",
+			ObjectId:  "c.2",
+			ObjectVal: nil,
+		}},
+	}
+	c.Test(t, false)
+}
+
+func Test5(t *testing.T) {
+	c := &Case{
+		Json: []byte(`[
+		  {
+			"name": "A",
+			"age": 25,
+			"friends": [
+			  {
+				"name": "A1",
+				"friends": [
+				  {
+					"name": "A11"
+				  },
+				  {
+					"name": "A12"
+				  }
+				]
+			  },
+			 {
+				"name": "A2",
+				"friends": [
+				  {
+					"name": "A21"
+				  },
+				  {
+					"name": "A22"
+				  }
+				]
+			  }
+			]
+		  },
+		  {
+			"name": "B",
 			"age": 26,
+			"friends": [
+			  {
+				"name": "B1",
+				"friends": [
+				  {
+					"name": "B11"
+				  },
+				  {
+					"name": "B12"
+				  }
+				]
+			  },
+			 {
+				"name": "B2",
+				"friends": [
+				  {
+					"name": "B21"
+				  },
+				  {
+					"name": "B22"
+				  }
+				]
+			  }
+			]
+		  }
+		]`),
+		Quads: []*Quad{
+			{"c.1", "name", "", "A"},
+			{"c.1", "age", "", 25},
+			{"c.2", "name", "", "A1"},
+			{"c.3", "name", "", "A11"},
+			{"c.4", "name", "", "A12"},
+			{"c.2", "friends", "c.3", nil},
+			{"c.2", "friends", "c.4", nil},
+			{"c.5", "name", "", "A2"},
+			{"c.6", "name", "", "A21"},
+			{"c.7", "name", "", "A22"},
+			{"c.5", "friends", "c.6", nil},
+			{"c.5", "friends", "c.7", nil},
+			{"c.1", "friends", "c.2", nil},
+			{"c.1", "friends", "c.5", nil},
+			{"c.8", "name", "", "B"},
+			{"c.8", "age", "", 26},
+			{"c.9", "name", "", "B1"},
+			{"c.10", "name", "", "B11"},
+			{"c.11", "name", "", "B12"},
+			{"c.9", "friends", "c.10", nil},
+			{"c.9", "friends", "c.11", nil},
+			{"c.12", "name", "", "B2"},
+			{"c.13", "name", "", "B21"},
+			{"c.14", "name", "", "B22"},
+			{"c.12", "friends", "c.13", nil},
+			{"c.12", "friends", "c.14", nil},
+			{"c.8", "friends", "c.9", nil},
+			{"c.8", "friends", "c.12", nil},
+		},
+	}
+	c.Test(t, false)
+}
+
+func TestGeo(t *testing.T) {
+	c := &Case{
+		Json: []byte(`{
+			"name": "Alice",
+			"age": 26.3,
 			"married": true,
 			"now": "2020-12-29T17:39:34.816808024Z",
 			"address": {
 				"type": "Point",
 				"coordinates": [
-					1.1, 
+					1.1,
 					2
 				]
 			}
@@ -64,7 +323,7 @@ func TestParser(t *testing.T) {
 			Subject:   "c.1",
 			Predicate: "age",
 			ObjectId:  "",
-			ObjectVal: 26,
+			ObjectVal: 26.3,
 		}, {
 			Subject:   "c.1",
 			Predicate: "married",
@@ -82,44 +341,8 @@ func TestParser(t *testing.T) {
 			ObjectVal: "[1.1 2]",
 		}},
 	}
-	c.Test(t)
+	c.Test(t, false)
 }
-
-/*
-func Test1(t *testing.T) {
-	json := []byte(`{
-		"name": "Alice",
-		"address": {},
-		"friend": [
-			{
-				"name": "Charlie",
-				"married": false,
-				"address": {}
-			}, {
-				"uid": "1000",
-				"name": "Bob",
-				"address": {}
-			}
-		]
-	}`)
-
-	w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-	fmt.Fprintf(w, "subject\tpredicate\tobject_id\tobject_val\n")
-	defer w.Flush()
-
-	quads, err := NewParser().Parse(json)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	for _, quad := range quads {
-		fmt.Fprintf(w, "%s\t%s\t%s\t%v\n",
-			quad.Subject, quad.Predicate, quad.ObjectId, quad.ObjectVal)
-	}
-
-	fmt.Println()
-}
-*/
 
 // NOTE: 2.4M nquads/sec on thinkpad x1 carbon with zero allocations--this is
 //       probably the upper limit on performance
@@ -259,7 +482,7 @@ func Benchmark1(b *testing.B) {
 
 	b.SetBytes(125)
 	for n := 0; n < b.N; n++ {
-		NewParser().Parse(json)
+		NewParser(false).Parse(json)
 	}
 }
 
@@ -400,7 +623,7 @@ func Benchmark1Para(b *testing.B) {
 	b.SetBytes(125)
 	b.RunParallel(func(pb *testing.PB) {
 		for pb.Next() {
-			NewParser().Parse(json)
+			NewParser(false).Parse(json)
 		}
 	})
 }

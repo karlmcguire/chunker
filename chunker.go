@@ -2,6 +2,7 @@ package chunker
 
 import (
 	"fmt"
+	"math"
 
 	json "github.com/minio/simdjson-go"
 )
@@ -23,7 +24,6 @@ const (
 	ARRAY
 	UID
 	GEO
-	GEO_COORDS
 )
 
 func (s ParserState) String() string {
@@ -42,8 +42,6 @@ func (s ParserState) String() string {
 		return "UID"
 	case GEO:
 		return "GEO"
-	case GEO_COORDS:
-		return "GEO_COORDS"
 	}
 	return "?"
 }
@@ -94,17 +92,19 @@ type (
 		Levels  []*DepthLevel
 	}
 	DepthLevel struct {
-		Type ParserState
-		Uids []string
-		Uid  string
+		Type   ParserState
+		Uids   []string
+		Uid    string
+		Closes uint64
 	}
 )
 
-func NewDepthLevel(t ParserState, c uint64) *DepthLevel {
+func NewDepthLevel(t ParserState, counter, closes uint64) *DepthLevel {
 	return &DepthLevel{
-		Type: t,
-		Uids: make([]string, 0),
-		Uid:  fmt.Sprintf("c.%d", c),
+		Type:   t,
+		Uids:   make([]string, 0),
+		Uid:    fmt.Sprintf("c.%d", counter),
+		Closes: closes,
 	}
 }
 
@@ -119,6 +119,13 @@ func NewDepth() *Depth {
 	return &Depth{
 		Levels: make([]*DepthLevel, 0),
 	}
+}
+
+func (d *Depth) Closes() uint64 {
+	if len(d.Levels) < 1 {
+		return 0
+	}
+	return d.Levels[len(d.Levels)-1].Closes
 }
 
 func (d *Depth) ArrayObject() bool {
@@ -145,32 +152,17 @@ func (d *Depth) Subject() string {
 	return d.Levels[len(d.Levels)-1].Subject()
 }
 
-func (d *Depth) Increase(t ParserState) {
+func (d *Depth) Increase(t ParserState, closes uint64) {
 	if t == OBJECT {
 		d.Counter++
 	}
-	d.Levels = append(d.Levels, NewDepthLevel(t, d.Counter))
+	d.Levels = append(d.Levels, NewDepthLevel(t, d.Counter, closes))
 }
 
 func (d *Depth) Decrease(t ParserState) *DepthLevel {
 	top := d.Levels[len(d.Levels)-1]
 	d.Levels = d.Levels[:len(d.Levels)-1]
 	return top
-}
-
-func (d *Depth) String() string {
-	o := ""
-	for _, level := range d.Levels {
-		switch level.Type {
-		case OBJECT:
-			o += "O "
-		case ARRAY:
-			o += "A "
-		default:
-			o += "?"
-		}
-	}
-	return o
 }
 
 type Parser struct {
@@ -181,17 +173,19 @@ type Parser struct {
 	Depth  *Depth
 	Quad   *Quad
 	Skip   bool
+	Logs   bool
 
 	stringOffset uint64
 }
 
-func NewParser() *Parser {
+func NewParser(logs bool) *Parser {
 	return &Parser{
 		State: NONE,
 		Quads: make([]*Quad, 0),
 		Quad:  &Quad{},
 		Queue: NewQueue(),
 		Depth: NewDepth(),
+		Logs:  logs,
 	}
 }
 
@@ -209,22 +203,26 @@ func (p *Parser) String(l uint64) string {
 	return s
 }
 
-func (p *Parser) Log(i int, c uint64, n byte) {
-	switch byte(c >> 56) {
-	case 'r', 'n', 't', 'f', 'l', 'u', 'd', '"', '[', ']', '{', '}':
-		fmt.Printf("%2d: %c %c %s\n", i, c>>56, n, p.State)
-	default:
+func (p *Parser) Log(i uint64, c uint64, n byte) {
+	if p.Logs {
+		switch byte(c >> 56) {
+		case 'r', 'n', 't', 'f', 'l', 'u', 'd', '"', '[', ']', '{', '}':
+			fmt.Printf("%2d: %c %c %s\n", i, byte(c>>56), n, p.State)
+		default:
+		}
 	}
 }
 
-func log(s string) {
-	fmt.Printf("\n        %s\n\n", s)
+func (p *Parser) LogMore(s string) {
+	if p.Logs {
+		fmt.Printf("\n        %s\n\n", s)
+	}
 }
 
 func (p *Parser) Walk() (err error) {
 	n := byte('n')
 
-	for i := 0; i < len(p.Parsed.Tape)-1; i++ {
+	for i := uint64(0); i < uint64(len(p.Parsed.Tape))-1; i++ {
 		// c is the current node on the tape
 		c := p.Parsed.Tape[i]
 
@@ -235,11 +233,15 @@ func (p *Parser) Walk() (err error) {
 			continue
 		}
 
+		// switch over the current node type
 		switch byte(c >> 56) {
 
 		// string
 		case '"':
+			// p.String grabs the string value from the string buffer and
+			// increments p.stringOffset to account for the length
 			s := p.String(p.Parsed.Tape[i+1])
+			// n is the next node type
 			n = byte(p.Parsed.Tape[i+2] >> 56)
 
 			switch p.State {
@@ -272,15 +274,30 @@ func (p *Parser) Walk() (err error) {
 				p.FoundUid(s)
 
 			case GEO:
-				// TODO:
+				switch s {
+				case "Point", "MultiPoint":
+					fallthrough
+				case "LineString", "MultiLineString":
+					fallthrough
+				case "Polygon", "MultiPolygon":
+					fallthrough
+				case "GeometryCollection":
+					// TODO: parsing geojson is hard so right now we skip over
+					//       the object
+					i = p.Depth.Closes()
+					p.LogMore(fmt.Sprintf("skipping %s geo object", s))
+					p.State = PREDICATE
+				}
 			}
 
 		// array open
 		case '[':
 			n = byte(p.Parsed.Tape[i+1] >> 56)
 			if n != ']' {
-				p.Depth.Increase(ARRAY)
+				p.Depth.Increase(ARRAY, (c<<8)>>8-1)
 			}
+
+			p.LogMore(fmt.Sprintf("closing [ at %d", (c<<8)>>8-1))
 
 			switch n {
 			case '[':
@@ -325,10 +342,10 @@ func (p *Parser) Walk() (err error) {
 		case '{':
 			n = byte(p.Parsed.Tape[i+1] >> 56)
 			if n != '}' {
-				p.Depth.Increase(OBJECT)
+				p.Depth.Increase(OBJECT, (c<<8)>>8-1)
 			}
 
-			log(fmt.Sprintf("closing bracket at %d", (c<<8)>>8-1))
+			p.LogMore(fmt.Sprintf("closing { at %d", (c<<8)>>8-1))
 
 			switch n {
 			case '{':
@@ -404,34 +421,35 @@ func (p *Parser) Walk() (err error) {
 
 		// int64
 		case 'l':
-			n = byte(p.Parsed.Tape[i+1] >> 56)
+			n = byte(p.Parsed.Tape[i+2] >> 56)
 
 			switch p.State {
 			case SCALAR:
 				p.State = PREDICATE
-				p.FoundValue(n)
+				// int64 value is stored after the current node (i + 1)
+				p.FoundValue(int64(p.Parsed.Tape[i+1]))
 			}
 
 		// uint64
 		case 'u':
-			n = byte(p.Parsed.Tape[i+1] >> 56)
+			n = byte(p.Parsed.Tape[i+2] >> 56)
 
 			switch p.State {
 			case SCALAR:
 				p.State = PREDICATE
-				// TODO: convert from tape
-				p.FoundValue(n)
+				// uint64 value is stored after the current node (i + 1)
+				p.FoundValue(p.Parsed.Tape[i+1])
 			}
 
 		// float64
 		case 'd':
-			n = byte(p.Parsed.Tape[i+1] >> 56)
+			n = byte(p.Parsed.Tape[i+2] >> 56)
 
 			switch p.State {
 			case SCALAR:
 				p.State = PREDICATE
-				// TODO: convert from tape
-				p.FoundValue(n)
+				// float64 value is stored after the current node (i + 1)
+				p.FoundValue(math.Float64frombits(p.Parsed.Tape[i+1]))
 			}
 		}
 
