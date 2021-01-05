@@ -1,12 +1,91 @@
 package chunker
 
 import (
-	"fmt"
-	"os"
 	"testing"
-	"text/tabwriter"
+
+	"github.com/davecgh/go-spew/spew"
 )
 
+type Case struct {
+	Json  []byte
+	Quads []*Quad
+}
+
+func (c *Case) Test(t *testing.T) {
+	quads, err := NewParser().Parse(c.Json)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(quads) != len(c.Quads) {
+		spew.Dump(quads)
+		t.Fatalf("expected %d quads but got %d\n", len(c.Quads), len(quads))
+	}
+	for i, quad := range quads {
+		if quad.Subject != c.Quads[i].Subject {
+			t.Fatalf("expected '%s' subject for quad %d but got '%s'\n",
+				c.Quads[i].Subject, i, quad.Subject)
+		}
+		if quad.Predicate != c.Quads[i].Predicate {
+			t.Fatalf("expected '%s' predicate for quad %d but got '%s'\n",
+				c.Quads[i].Predicate, i, quad.Predicate)
+		}
+		if quad.ObjectId != c.Quads[i].ObjectId {
+			t.Fatalf("expected '%s' objectId for quad %d but got '%s'\n",
+				c.Quads[i].ObjectId, i, quad.ObjectId)
+		}
+		if quad.ObjectVal != c.Quads[i].ObjectVal {
+			t.Fatalf("expected '%v' objectVal for quad %d but got '%v'\n",
+				c.Quads[i].ObjectVal, i, quad.ObjectVal)
+		}
+	}
+}
+
+func TestParser(t *testing.T) {
+	c := &Case{
+		Json: []byte(`{
+			"name": "Alice",
+			"age": 26,
+			"married": true,
+			"now": "2020-12-29T17:39:34.816808024Z",
+			"address": {
+				"type": "Point",
+				"coordinates": [
+					1.1, 
+					2
+				]
+			}
+		}`),
+		Quads: []*Quad{{
+			Subject:   "c.1",
+			Predicate: "name",
+			ObjectId:  "",
+			ObjectVal: "Alice",
+		}, {
+			Subject:   "c.1",
+			Predicate: "age",
+			ObjectId:  "",
+			ObjectVal: 26,
+		}, {
+			Subject:   "c.1",
+			Predicate: "married",
+			ObjectId:  "",
+			ObjectVal: true,
+		}, {
+			Subject:   "c.1",
+			Predicate: "now",
+			ObjectId:  "",
+			ObjectVal: "2020-12-29T17:39:34.816808024Z",
+		}, {
+			Subject:   "c.1",
+			Predicate: "address",
+			ObjectId:  "",
+			ObjectVal: "[1.1 2]",
+		}},
+	}
+	c.Test(t)
+}
+
+/*
 func Test1(t *testing.T) {
 	json := []byte(`{
 		"name": "Alice",
@@ -40,6 +119,7 @@ func Test1(t *testing.T) {
 
 	fmt.Println()
 }
+*/
 
 // NOTE: 2.4M nquads/sec on thinkpad x1 carbon with zero allocations--this is
 //       probably the upper limit on performance

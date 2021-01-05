@@ -222,7 +222,6 @@ func log(s string) {
 }
 
 func (p *Parser) Walk() (err error) {
-	s := ""
 	n := byte('n')
 
 	for i := 0; i < len(p.Parsed.Tape)-1; i++ {
@@ -240,7 +239,7 @@ func (p *Parser) Walk() (err error) {
 
 		// string
 		case '"':
-			s = p.String(p.Parsed.Tape[i+1])
+			s := p.String(p.Parsed.Tape[i+1])
 			n = byte(p.Parsed.Tape[i+2] >> 56)
 
 			switch p.State {
