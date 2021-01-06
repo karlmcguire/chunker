@@ -1,7 +1,7 @@
 package chunker
 
 import (
-	"fmt"
+	"reflect"
 	"testing"
 
 	"github.com/davecgh/go-spew/spew"
@@ -20,6 +20,9 @@ func (c *Case) Test(t *testing.T, logs bool) {
 			return
 		}
 		t.Fatal(err)
+	}
+	if c.ExpectErr {
+		t.Fatalf("expected an error")
 	}
 	if len(quads) != len(c.Quads) {
 		t.Fatalf("expected %d quads but got %d\n", len(c.Quads), len(quads))
@@ -40,13 +43,43 @@ func (c *Case) Test(t *testing.T, logs bool) {
 			t.Fatalf("expected '%s' objectId for quad %d but got '%s'\n",
 				c.Quads[i].ObjectId, i, quad.ObjectId)
 		}
-		// normalize objectVal (sometimes int64s become uint64s, etc)
-		objectVal := fmt.Sprintf("%v", quad.ObjectVal)
-		correctObjectVal := fmt.Sprintf("%v", c.Quads[i].ObjectVal)
-		if objectVal != correctObjectVal {
+		// make sure the values are of the same type
+		valType := reflect.TypeOf(quad.ObjectVal).String()
+		correctValType := reflect.TypeOf(c.Quads[i].ObjectVal).String()
+		if valType != correctValType {
 			spew.Dump(quad)
-			t.Fatalf("expected '%v' objectVal for quad %d but got '%v'\n",
-				c.Quads[i].ObjectVal, i, quad.ObjectVal)
+			t.Fatalf("expected %s objectVal for quad %d but got %s\n",
+				correctValType, i, valType)
+		}
+		// make sure the values are equal
+		switch correctValType {
+		case "string":
+			if quad.ObjectVal.(string) != c.Quads[i].ObjectVal.(string) {
+				t.Fatalf("expected '%s' objectVal for quad %d but got '%s'\n",
+					c.Quads[i].ObjectVal.(string), i, quad.ObjectVal.(string))
+			}
+		case "int64":
+			if quad.ObjectVal.(int64) != c.Quads[i].ObjectVal.(int64) {
+				t.Fatalf("expected %d objectVal for quad %d but got %d\n",
+					c.Quads[i].ObjectVal.(int64), i, quad.ObjectVal.(int64))
+			}
+		case "uint64":
+			if quad.ObjectVal.(uint64) != c.Quads[i].ObjectVal.(uint64) {
+				t.Fatalf("expected %d objectVal for quad %d but got %d\n",
+					c.Quads[i].ObjectVal.(uint64), i, quad.ObjectVal.(uint64))
+			}
+		case "float64":
+			if quad.ObjectVal.(float64) != c.Quads[i].ObjectVal.(float64) {
+				t.Fatalf("expected %f objectVal for quad %d but got %f\n",
+					c.Quads[i].ObjectVal.(float64), i, quad.ObjectVal.(float64))
+			}
+		case "bool":
+			if quad.ObjectVal.(bool) != c.Quads[i].ObjectVal.(bool) {
+				t.Fatalf("expected %v objectVal for quad %d but got %v\n",
+					c.Quads[i].ObjectVal.(bool), i, quad.ObjectVal.(bool))
+			}
+		default:
+			t.Fatal("objectVal type not handled")
 		}
 	}
 }
@@ -62,74 +95,74 @@ func TestNumbers(t *testing.T) {
 			Quads: []*Quad{{
 				Subject:   "1",
 				Predicate: "key",
-				ObjectVal: 9223372036854775299,
+				ObjectVal: int64(9223372036854775299),
 			}},
 		},
 		{
 			Json: []byte(`{
-				"uid": "1",
+				"uid": "2",
 				"key": 9223372036854775299.0
 			}`),
 			Quads: []*Quad{{
-				Subject:   "1",
+				Subject:   "2",
 				Predicate: "key",
-				ObjectVal: 9223372036854775299.0,
+				ObjectVal: float64(9223372036854775299.0),
 			}},
 		},
 		{
 			Json: []byte(`{
-				"uid": "1",
-				"key": 27670116110564327426, 
+				"uid": "3",
+				"key": 27670116110564327426
 			}`),
 			ExpectErr: true,
 		},
 		{
 			Json: []byte(`{
-				"uid": "1",
+				"uid": "4",
 				"key": "23452786"
 			}`),
 			Quads: []*Quad{{
-				Subject:   "1",
+				Subject:   "4",
 				Predicate: "key",
 				ObjectVal: "23452786",
 			}},
 		},
 		{
 			Json: []byte(`{
-				"uid": "1",
+				"uid": "5",
 				"key": "23452786.2378"
 			}`),
 			Quads: []*Quad{{
-				Subject:   "1",
+				Subject:   "5",
 				Predicate: "key",
 				ObjectVal: "23452786.2378",
 			}},
 		},
 		{
 			Json: []byte(`{
-				"uid": "1",
+				"uid": "6",
 				"key": -1e10
 			}`),
 			Quads: []*Quad{{
-				Subject:   "1",
+				Subject:   "6",
 				Predicate: "key",
-				ObjectVal: -1e+10,
+				ObjectVal: float64(-1e+10),
 			}},
 		},
 		{
 			Json: []byte(`{
-				"uid": "1",
+				"uid": "7",
 				"key": 0E-0
 			}`),
 			Quads: []*Quad{{
-				Subject:   "1",
+				Subject:   "7",
 				Predicate: "key",
-				ObjectVal: 0,
+				ObjectVal: float64(0),
 			}},
 		},
 	}
 	for _, c := range cases {
-		c.Test(t, true)
+		c.Test(t, false)
 	}
 }
 
