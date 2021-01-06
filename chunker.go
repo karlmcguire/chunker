@@ -6,6 +6,7 @@ import (
 	"math"
 	"strings"
 
+	"github.com/dgraph-io/tok"
 	json "github.com/minio/simdjson-go"
 )
 
@@ -41,7 +42,7 @@ type Facet struct {
 	Key     string
 	Value   []byte
 	ValType FacetType
-	//Tokens  []string
+	Tokens  []string
 	//Alias   string
 }
 
@@ -376,7 +377,10 @@ func (p *Parser) Walk() (err error) {
 
 			case FACET_SCALAR:
 				p.State = PREDICATE
-				p.FoundScalarFacet(s)
+				err = p.FoundScalarFacet(s)
+				if err != nil {
+					return err
+				}
 			}
 
 		// array open
@@ -504,7 +508,10 @@ func (p *Parser) Walk() (err error) {
 				p.FoundValue(true)
 			case FACET_SCALAR:
 				p.State = PREDICATE
-				p.FoundScalarFacet(true)
+				err = p.FoundScalarFacet(true)
+				if err != nil {
+					return err
+				}
 			}
 
 		// false
@@ -517,7 +524,10 @@ func (p *Parser) Walk() (err error) {
 				p.FoundValue(false)
 			case FACET_SCALAR:
 				p.State = PREDICATE
-				p.FoundScalarFacet(false)
+				err = p.FoundScalarFacet(false)
+				if err != nil {
+					return err
+				}
 			}
 
 		// int64
@@ -531,7 +541,10 @@ func (p *Parser) Walk() (err error) {
 				p.FoundValue(int64(p.Parsed.Tape[i+1]))
 			case FACET_SCALAR:
 				p.State = PREDICATE
-				p.FoundScalarFacet(p.Parsed.Tape[i+1])
+				err = p.FoundScalarFacet(p.Parsed.Tape[i+1])
+				if err != nil {
+					return err
+				}
 			}
 
 		// uint64
@@ -545,7 +558,10 @@ func (p *Parser) Walk() (err error) {
 				p.FoundValue(p.Parsed.Tape[i+1])
 			case FACET_SCALAR:
 				p.State = PREDICATE
-				p.FoundScalarFacet(p.Parsed.Tape[i+1])
+				err = p.FoundScalarFacet(p.Parsed.Tape[i+1])
+				if err != nil {
+					return err
+				}
 			}
 
 		// float64
@@ -559,7 +575,10 @@ func (p *Parser) Walk() (err error) {
 				p.FoundValue(math.Float64frombits(p.Parsed.Tape[i+1]))
 			case FACET_SCALAR:
 				p.State = PREDICATE
-				p.FoundScalarFacet(math.Float64frombits(p.Parsed.Tape[i+1]))
+				err = p.FoundScalarFacet(math.Float64frombits(p.Parsed.Tape[i+1]))
+				if err != nil {
+					return err
+				}
 			}
 		}
 
@@ -589,9 +608,13 @@ func (p *Parser) FoundValue(v interface{}) {
 	p.Quad = NewQuad()
 }
 
-func (p *Parser) FoundScalarFacet(v interface{}) {
+func (p *Parser) FoundScalarFacet(v interface{}) error {
 	switch val := v.(type) {
 	case string:
+		tokens, err := tok.GetTermTokens([]string{val})
+		if err != nil {
+			return err
+		}
 		// TODO: handle DATETIME
 		p.Facet.Value = []byte(val)
 		p.Facet.ValType = STRING
@@ -621,4 +644,5 @@ func (p *Parser) FoundScalarFacet(v interface{}) {
 			break
 		}
 	}
+	return nil
 }
