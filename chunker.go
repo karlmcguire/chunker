@@ -41,7 +41,7 @@ type Facet struct {
 	Key     string
 	Value   []byte
 	ValType FacetType
-	//Tokens  []string
+	Tokens  []string
 	//Alias   string
 }
 
@@ -607,10 +607,10 @@ func (p *Parser) FoundValue(v interface{}) {
 	p.Quad = NewQuad()
 }
 
+// TODO: determining facet type, getting tokens, getting alias
 func (p *Parser) FoundScalarFacet(v interface{}) error {
 	switch val := v.(type) {
 	case string:
-		// TODO: handle DATETIME
 		p.Facet.Value = []byte(val)
 		p.Facet.ValType = STRING
 	case int64:

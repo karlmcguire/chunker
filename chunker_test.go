@@ -8,13 +8,17 @@ import (
 )
 
 type Case struct {
-	Json  []byte
-	Quads []*Quad
+	Json      []byte
+	Quads     []*Quad
+	ExpectErr bool
 }
 
 func (c *Case) Test(t *testing.T, logs bool) {
 	quads, err := NewParser(logs).Parse(c.Json)
 	if err != nil {
+		if c.ExpectErr {
+			return
+		}
 		t.Fatal(err)
 	}
 	if len(quads) != len(c.Quads) {
@@ -47,72 +51,118 @@ func (c *Case) Test(t *testing.T, logs bool) {
 	}
 }
 
-func Test1(t *testing.T) {
-	c := &Case{
-		Json: []byte(`{
-			"name": "Alice",
-			"address": {},
-			"friend": [
-				{
-					"name": "Charlie",
-					"married": false,
-					"address": {}
-				}, {
-					"uid": "1000",
-					"name": "Bob",
-					"address": {}
-				}
-			]
-		}`),
-		Quads: []*Quad{{
-			Subject:   "c.1",
-			Predicate: "name",
-			ObjectId:  "",
-			ObjectVal: "Alice",
-		}, {
-			Subject:   "c.2",
-			Predicate: "name",
-			ObjectId:  "",
-			ObjectVal: "Charlie",
-		}, {
-			Subject:   "c.2",
-			Predicate: "married",
-			ObjectId:  "",
-			ObjectVal: false,
-		}, {
-			Subject:   "1000",
-			Predicate: "name",
-			ObjectId:  "",
-			ObjectVal: "Bob",
-		}, {
-			Subject:   "c.1",
-			Predicate: "friend",
-			ObjectId:  "c.2",
-			ObjectVal: nil,
-		}, {
-			Subject:   "c.1",
-			Predicate: "friend",
-			ObjectId:  "1000",
-			ObjectVal: nil,
-		}},
+// simdjson has number parsing issues, so this is a very important test
+func TestNumbers(t *testing.T) {
+	cases := []*Case{
+		{
+			Json: []byte(`{
+				"uid": "1",
+				"key": 9223372036854775299
+			}`),
+			Quads: []*Quad{{
+				Subject:   "1",
+				Predicate: "key",
+				ObjectVal: 9223372036854775299,
+			}},
+		},
+		{
+			Json: []byte(`{
+				"uid": "1",
+				"key": 9223372036854775299.0
+			}`),
+			Quads: []*Quad{{
+				Subject:   "1",
+				Predicate: "key",
+				ObjectVal: 9223372036854775299.0,
+			}},
+		},
+		{
+			Json: []byte(`{
+				"uid": "1",
+				"key": 27670116110564327426, 
+			}`),
+			ExpectErr: true,
+		},
+		{
+			Json: []byte(`{
+				"uid": "1",
+				"key": "23452786"
+			}`),
+			Quads: []*Quad{{
+				Subject:   "1",
+				Predicate: "key",
+				ObjectVal: "23452786",
+			}},
+		},
+		{
+			Json: []byte(`{
+				"uid": "1",
+				"key": "23452786.2378"
+			}`),
+			Quads: []*Quad{{
+				Subject:   "1",
+				Predicate: "key",
+				ObjectVal: "23452786.2378",
+			}},
+		},
+		{
+			Json: []byte(`{
+				"uid": "1",
+				"key": -1e10
+			}`),
+			Quads: []*Quad{{
+				Subject:   "1",
+				Predicate: "key",
+				ObjectVal: -1e+10,
+			}},
+		},
+		{
+			Json: []byte(`{
+				"uid": "1",
+				"key": 0E-0
+			}`),
+			Quads: []*Quad{{
+				Subject:   "1",
+				Predicate: "key",
+				ObjectVal: 0,
+			}},
+		},
 	}
-	c.Test(t, false)
+	for _, c := range cases {
+		c.Test(t, true)
+	}
 }
 
 func TestFacets1(t *testing.T) {
 	/*
 		TODO: this is the correct output, the case should match this:
 
-		(subject:"_:dg.1417165956.1" predicate:"mobile" object_value:<str_val:"040123456" >
-		    facets:<key:"operation" value:"READ WRITE" tokens:"\001read" tokens:"\001write" > )
+		predicate:"mobile" object_value:<str_val:"040123456" >
 
-		(subject:"_:dg.1417165956.1" predicate:"car" object_value:<str_val:"MA0123" >
-		    facets:<key:"age" value:"\003\000\000\000\000\000\000\000" val_type:INT >
-		    facets:<key:"price" value:"q=\n\327#L\335@" val_type:FLOAT >
-		    facets:<key:"since" value:"\001\000\000\000\016\273K7\345\000\000\000\000\377\377" val_type:DATETIME >
+		    facets:<key:"operation"
+					value:"READ WRITE"
+					tokens:"\001read"
+					tokens:"\001write" > )
+
+
+		predicate:"car" object_value:<str_val:"MA0123" >
+
+		    facets:<key:"age"
+					value:"\003\000\000\000\000\000\000\000"
+					val_type:INT >
+
+		    facets:<key:"price"
+					value:"q=\n\327#L\335@"
+					val_type:FLOAT >
+
+		    facets:<key:"since"
+					value:"\001\000\000\000\016\273K7\345\000\000\000\000\377\377"
+					val_type:DATETIME >
+
 		    facets:<key:"first" value:"\001" val_type:BOOL > ),
 
-		(subject:"_:dg.1417165956.1" predicate:"name" object_value:<str_val:"Alice" > )
+
+		predicate:"name" object_value:<str_val:"Alice" > )
 	*/
 
 	c := &Case{
@@ -166,6 +216,58 @@ func TestFacets1(t *testing.T) {
 		}},
 	}
 	c.Test(t, true)
+}
+
+func Test1(t *testing.T) {
+	c := &Case{
+		Json: []byte(`{
+			"name": "Alice",
+			"address": {},
+			"friend": [
+				{
+					"name": "Charlie",
+					"married": false,
+					"address": {}
+				}, {
+					"uid": "1000",
+					"name": "Bob",
+					"address": {}
+				}
+			]
+		}`),
+		Quads: []*Quad{{
+			Subject:   "c.1",
+			Predicate: "name",
+			ObjectId:  "",
+			ObjectVal: "Alice",
+		}, {
+			Subject:   "c.2",
+			Predicate: "name",
+			ObjectId:  "",
+			ObjectVal: "Charlie",
+		}, {
+			Subject:   "c.2",
+			Predicate: "married",
+			ObjectId:  "",
+			ObjectVal: false,
+		}, {
+			Subject:   "1000",
+			Predicate: "name",
+			ObjectId:  "",
+			ObjectVal: "Bob",
+		}, {
+			Subject:   "c.1",
+			Predicate: "friend",
+			ObjectId:  "c.2",
+			ObjectVal: nil,
+		}, {
+			Subject:   "c.1",
+			Predicate: "friend",
+			ObjectId:  "1000",
+			ObjectVal: nil,
+		}},
+	}
+	c.Test(t, false)
 }
 
 func Test2(t *testing.T) {
