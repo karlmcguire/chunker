@@ -43,6 +43,9 @@ func (c *Case) Test(t *testing.T, logs bool) {
 			t.Fatalf("expected '%s' objectId for quad %d but got '%s'\n",
 				c.Quads[i].ObjectId, i, quad.ObjectId)
 		}
+		if quad.ObjectVal == nil && c.Quads[i].ObjectVal == nil {
+			continue
+		}
 		// make sure the values are of the same type
 		valType := reflect.TypeOf(quad.ObjectVal).String()
 		correctValType := reflect.TypeOf(c.Quads[i].ObjectVal).String()
@@ -362,12 +365,12 @@ func Test3(t *testing.T) {
 			Subject:   "c.1",
 			Predicate: "age",
 			ObjectId:  "",
-			ObjectVal: 21,
+			ObjectVal: int64(21),
 		}, {
 			Subject:   "c.1",
 			Predicate: "weight",
 			ObjectId:  "",
-			ObjectVal: 58.7,
+			ObjectVal: float64(58.7),
 		}},
 	}
 	c.Test(t, false)
@@ -393,7 +396,7 @@ func Test4(t *testing.T) {
 			Subject:   "c.1",
 			Predicate: "age",
 			ObjectId:  "",
-			ObjectVal: 25,
+			ObjectVal: int64(25),
 		}, {
 			Subject:   "c.2",
 			Predicate: "name",
@@ -471,7 +474,7 @@ func Test5(t *testing.T) {
 		]`),
 		Quads: []*Quad{
 			{"c.1", "name", "", "A", nil},
-			{"c.1", "age", "", 25, nil},
+			{"c.1", "age", "", int64(25), nil},
 			{"c.2", "name", "", "A1", nil},
 			{"c.3", "name", "", "A11", nil},
 			{"c.4", "name", "", "A12", nil},
@@ -485,7 +488,7 @@ func Test5(t *testing.T) {
 			{"c.1", "friends", "c.2", nil, nil},
 			{"c.1", "friends", "c.5", nil, nil},
 			{"c.8", "name", "", "B", nil},
-			{"c.8", "age", "", 26, nil},
+			{"c.8", "age", "", int64(26), nil},
 			{"c.9", "name", "", "B1", nil},
 			{"c.10", "name", "", "B11", nil},
 			{"c.11", "name", "", "B12", nil},
@@ -527,7 +530,7 @@ func TestGeo(t *testing.T) {
 			Subject:   "c.1",
 			Predicate: "age",
 			ObjectId:  "",
-			ObjectVal: 26.3,
+			ObjectVal: float64(26.3),
 		}, {
 			Subject:   "c.1",
 			Predicate: "married",
