@@ -13,7 +13,7 @@ type Case struct {
 }
 
 func (c *Case) Test(t *testing.T, logs bool) {
-	quads, _, err := NewParser(logs).Parse(c.Json)
+	quads, err := NewParser(logs).Parse(c.Json)
 	if err != nil {
 		t.Fatal(err)
 	}

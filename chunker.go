@@ -246,12 +246,12 @@ func NewParser(logs bool) *Parser {
 	}
 }
 
-func (p *Parser) Parse(d []byte) ([]*Quad, []*Facet, error) {
+func (p *Parser) Parse(d []byte) ([]*Quad, error) {
 	var err error
 	if p.Parsed, err = json.Parse(d, nil); err != nil {
-		return nil, nil, err
+		return nil, err
 	}
-	return p.Quads, p.Facets, p.Walk()
+	return p.Quads, p.Walk()
 }
 
 func (p *Parser) String(l uint64) string {
@@ -277,6 +277,7 @@ func (p *Parser) LogMore(s string) {
 }
 
 func (p *Parser) Walk() (err error) {
+	// n is a placeholder for the next node
 	n := byte('n')
 
 	for i := uint64(0); i < uint64(len(p.Parsed.Tape))-1; i++ {
@@ -325,13 +326,7 @@ func (p *Parser) Walk() (err error) {
 				case '[':
 					p.State = ARRAY
 					p.FoundSubject(ARRAY, p.Depth.Subject())
-				case '"', 't', 'f', 'l', 'u', 'd':
-					if p.State == FACET {
-						p.Quad = NewQuad()
-						p.State = FACET_SCALAR
-						p.Facet.Pred = keys[0]
-						p.Facet.Key = keys[1]
-					}
+				//case '"', 't', 'f', 'l', 'u', 'd':
 				default:
 					switch p.Quad.Predicate {
 					case "uid":
@@ -339,6 +334,12 @@ func (p *Parser) Walk() (err error) {
 					case "type":
 						p.State = GEO
 					default:
+						if p.State == FACET {
+							p.Quad = NewQuad()
+							p.State = FACET_SCALAR
+							p.Facet.Pred = keys[0]
+							p.Facet.Key = keys[1]
+						}
 						p.State = SCALAR
 					}
 				}
