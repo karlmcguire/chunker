@@ -6,7 +6,6 @@ import (
 	"math"
 	"strings"
 
-	"github.com/dgraph-io/tok"
 	json "github.com/minio/simdjson-go"
 )
 
@@ -42,7 +41,7 @@ type Facet struct {
 	Key     string
 	Value   []byte
 	ValType FacetType
-	Tokens  []string
+	//Tokens  []string
 	//Alias   string
 }
 
@@ -611,10 +610,6 @@ func (p *Parser) FoundValue(v interface{}) {
 func (p *Parser) FoundScalarFacet(v interface{}) error {
 	switch val := v.(type) {
 	case string:
-		tokens, err := tok.GetTermTokens([]string{val})
-		if err != nil {
-			return err
-		}
 		// TODO: handle DATETIME
 		p.Facet.Value = []byte(val)
 		p.Facet.ValType = STRING
