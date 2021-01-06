@@ -14,6 +14,7 @@ type FacetType uint8
 const (
 	STRING FacetType = iota
 	INT
+	UINT
 	FLOAT
 	BOOL
 	DATETIME
@@ -307,6 +308,7 @@ func (p *Parser) Walk() (err error) {
 			case PREDICATE:
 				p.FoundPredicate(s)
 
+				// check if facet
 				var keys []string
 				if strings.Contains(s, "|") {
 					keys = strings.Split(s, "|")
@@ -318,12 +320,14 @@ func (p *Parser) Walk() (err error) {
 				switch n {
 				case '{':
 					if p.State == FACET {
-						p.State = FACET_MAP
-					} else {
-						p.State = OBJECT
-						p.FoundSubject(OBJECT, p.Depth.Subject())
+						p.LogMore("found facet object")
 					}
+					p.State = OBJECT
+					p.FoundSubject(OBJECT, p.Depth.Subject())
 				case '[':
+					if p.State == FACET {
+						p.LogMore("found facet array")
+					}
 					p.State = ARRAY
 					p.FoundSubject(ARRAY, p.Depth.Subject())
 				//case '"', 't', 'f', 'l', 'u', 'd':
@@ -335,12 +339,14 @@ func (p *Parser) Walk() (err error) {
 						p.State = GEO
 					default:
 						if p.State == FACET {
+							p.State = FACET_SCALAR
 							p.Quad = NewQuad()
 							p.State = FACET_SCALAR
 							p.Facet.Pred = keys[0]
 							p.Facet.Key = keys[1]
+						} else {
+							p.State = SCALAR
 						}
-						p.State = SCALAR
 					}
 				}
 
@@ -588,20 +594,24 @@ func (p *Parser) FoundScalarFacet(v interface{}) {
 	case string:
 		// TODO: handle DATETIME
 		p.Facet.Value = []byte(val)
+		p.Facet.ValType = STRING
 	case int64:
 		var b [8]byte
 		binary.LittleEndian.PutUint64(b[:], uint64(val))
 		p.Facet.Value = b[:]
+		p.Facet.ValType = INT
 	case uint64:
 		var b [8]byte
 		binary.LittleEndian.PutUint64(b[:], val)
 		p.Facet.Value = b[:]
+		p.Facet.ValType = UINT
 	case bool:
 		b := []byte{0x00}
 		if val {
 			b[0] = 0x01
 		}
 		p.Facet.Value = b
+		p.Facet.ValType = BOOL
 	}
 	// search quads in reverse order for the facet predicate
 	for i := len(p.Quads) - 1; i > 0; i-- {
