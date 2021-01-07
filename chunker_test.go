@@ -202,7 +202,7 @@ func TestNumbers(t *testing.T) {
 	}
 }
 
-func TestFacets1(t *testing.T) {
+func TestFacetsScalar(t *testing.T) {
 	c := &Case{
 		Json: []byte(`[{
 			"name": "Alice",
@@ -226,8 +226,8 @@ func TestFacets1(t *testing.T) {
 			ObjectVal: "040123456",
 			Facets: []*Facet{{
 				Key:     "operation",
-				Value:   []byte(`READ WRITE`),
 				ValType: STRING,
+				Value:   []byte(`READ WRITE`),
 				Tokens:  []string{"\x01read", "\x01write"},
 			}},
 		}, {
@@ -237,33 +237,97 @@ func TestFacets1(t *testing.T) {
 			ObjectVal: "MA0123",
 			Facets: []*Facet{{
 				Key:     "first",
-				Value:   []byte{0x01},
 				ValType: BOOL,
+				Value:   []byte{0x01},
 			}, {
-				Key: "age",
+				Key:     "age",
+				ValType: INT,
 				Value: []byte{
 					0x03, 0x00, 0x00, 0x00,
-					0x00, 0x00, 0x00, 0x00},
-				ValType: INT,
+					0x00, 0x00, 0x00, 0x00,
+				},
 			}, {
-				Key: "price",
+				Key:     "price",
+				ValType: FLOAT,
 				Value: []byte{
 					0x71, 0x3d, 0x0a, 0xd7,
 					0x23, 0x4c, 0xdd, 0x40,
 				},
-				ValType: FLOAT,
 			}, {
-				Key: "since",
+				Key:     "since",
+				ValType: DATETIME,
 				Value: []byte{
 					0x01, 0x00, 0x00, 0x00,
 					0x0e, 0xbb, 0x4b, 0x37,
 					0xe5, 0x00, 0x00, 0x00,
-					0x00, 0xff, 0xff},
-				ValType: DATETIME,
+					0x00, 0xff, 0xff,
+				},
 			}},
 		}},
 	}
 	c.Test(t, false)
+}
+
+func TestFacetsMap(t *testing.T) {
+	c := &Case{
+		Json: []byte(`[{
+			"name": "Alice",
+			"friend": ["Joshua", "David", "Josh"],
+			"friend|from": {
+				"0": "school",
+				"2": "college"
+			},
+			"friend|age": {
+				"1": 20,
+				"2": 21
+			}
+		}]`),
+		Quads: []*Quad{{
+			Subject:   "c.1",
+			Predicate: "name",
+			ObjectVal: "Alice",
+		}, {
+			Subject:   "c.1",
+			Predicate: "friend",
+			ObjectVal: "Joshua",
+			Facets: []*Facet{{
+				Key:     "from",
+				ValType: STRING,
+				Value:   []byte("school"),
+				Tokens:  []string{"\x01school"},
+			}},
+		}, {
+			Subject:   "c.1",
+			Predicate: "friend",
+			ObjectVal: "David",
+			Facets: []*Facet{{
+				Key:     "age",
+				ValType: INT,
+				Value: []byte{
+					0x24, 0x00, 0x00, 0x00,
+					0x00, 0x00, 0x00, 0x00,
+				},
+			}},
+		}, {
+			Subject:   "c.1",
+			Predicate: "friend",
+			ObjectVal: "Josh",
+			Facets: []*Facet{{
+				Key:     "age",
+				ValType: INT,
+				Value: []byte{
+					0x25, 0x00, 0x00, 0x00,
+					0x00, 0x00, 0x00, 0x00,
+				},
+			}, {
+				Key:     "from",
+				ValType: STRING,
+				Value:   []byte("college"),
+				Tokens:  []string{"\x01college"},
+			}},
+		}},
+	}
+	c.Test(t, true)
 }
 
 func Test1(t *testing.T) {
@@ -425,6 +489,38 @@ func Test4(t *testing.T) {
 }
 
 func Test5(t *testing.T) {
+	c := &Case{
+		Json: []byte(`[{
+			"name": "Alice",
+			"friends": ["Bob", "Josh"],
+			"ages": [26, 33.2]
+		}]`),
+		Quads: []*Quad{{
+			Subject:   "c.1",
+			Predicate: "name",
+			ObjectVal: "Alice",
+		}, {
+			Subject:   "c.1",
+			Predicate: "friends",
+			ObjectVal: "Bob",
+		}, {
+			Subject:   "c.1",
+			Predicate: "friends",
+			ObjectVal: "Josh",
+		}, {
+			Subject:   "c.1",
+			Predicate: "ages",
+			ObjectVal: int64(26),
+		}, {
+			Subject:   "c.1",
+			Predicate: "ages",
+			ObjectVal: float64(33.2),
+		}},
+	}
+	c.Test(t, false)
+}
+
+func Test6(t *testing.T) {
 	c := &Case{
 		Json: []byte(`[
 		  {

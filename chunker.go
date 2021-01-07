@@ -68,6 +68,7 @@ const (
 	SCALAR
 	OBJECT
 	ARRAY
+	ARRAY_SCALAR
 	FACET
 	FACET_SCALAR
 	FACET_MAP
@@ -87,6 +88,8 @@ func (s ParserState) String() string {
 		return "OBJECT"
 	case ARRAY:
 		return "ARRAY"
+	case ARRAY_SCALAR:
+		return "ARRAY_SCALAR"
 	case FACET:
 		return "FACET"
 	case FACET_SCALAR:
@@ -115,6 +118,10 @@ func NewQueue() *Queue {
 	return &Queue{
 		Waiting: make([]*QueueQuad, 0),
 	}
+}
+
+func (q *Queue) Update(t ParserState) {
+	q.Waiting[len(q.Waiting)-1].Type = t
 }
 
 func (q *Queue) Recent(t ParserState) bool {
@@ -149,6 +156,7 @@ type (
 	DepthLevel struct {
 		Type   ParserState
 		Uids   []string
+		Vals   []interface{}
 		Uid    string
 		Closes uint64
 	}
@@ -158,6 +166,7 @@ func NewDepthLevel(t ParserState, counter, closes uint64) *DepthLevel {
 	return &DepthLevel{
 		Type:   t,
 		Uids:   make([]string, 0),
+		Vals:   make([]interface{}, 0),
 		Uid:    fmt.Sprintf("c.%d", counter),
 		Closes: closes,
 	}
@@ -188,6 +197,14 @@ func (d *Depth) ArrayObject() bool {
 		return false
 	}
 	return d.Levels[len(d.Levels)-2].Type == ARRAY
+}
+
+func (d *Depth) ArrayVal(v interface{}) {
+	if len(d.Levels) < 1 {
+		return
+	}
+	array := d.Levels[len(d.Levels)-1]
+	array.Vals = append(array.Vals, v)
 }
 
 func (d *Depth) ArrayUid(uid string) {
@@ -240,7 +257,7 @@ func NewParser(logs bool) *Parser {
 		State:  NONE,
 		Quads:  make([]*Quad, 0),
 		Facets: make([]*Facet, 0),
-		Quad:   &Quad{},
+		Quad:   NewQuad(),
 		Facet:  &Facet{},
 		Queue:  NewQueue(),
 		Depth:  NewDepth(),
@@ -354,6 +371,10 @@ func (p *Parser) Walk() (err error) {
 				p.State = PREDICATE
 				p.FoundValue(s)
 
+			case ARRAY_SCALAR:
+				p.State = ARRAY_SCALAR
+				p.FoundArrayVal(s)
+
 			case UID:
 				p.State = PREDICATE
 				p.FoundUid(s)
@@ -376,7 +397,7 @@ func (p *Parser) Walk() (err error) {
 
 			case FACET_SCALAR:
 				p.State = PREDICATE
-				err = p.FoundScalarFacet(s)
+				err = p.FoundFacet(s)
 				if err != nil {
 					return err
 				}
@@ -401,13 +422,27 @@ func (p *Parser) Walk() (err error) {
 			case '{':
 				p.State = OBJECT
 			default:
-				p.State = SCALAR
+				p.State = ARRAY_SCALAR
+				p.Queue.Update(ARRAY_SCALAR)
 			}
 
 		// array close
 		case ']':
 			n = byte(p.Parsed.Tape[i+1] >> 56)
 
+			if !p.Queue.Empty() {
+				if waiting := p.Queue.Pop(ARRAY_SCALAR); waiting != nil {
+					vals := p.Depth.Decrease(ARRAY_SCALAR).Vals
+					for _, val := range vals {
+						p.Quads = append(p.Quads, &Quad{
+							Subject:   p.Depth.Subject(),
+							Predicate: waiting.Predicate,
+							ObjectVal: val,
+							Facets:    make([]*Facet, 0),
+						})
+					}
+				}
+			}
 			if !p.Queue.Empty() {
 				if waiting := p.Queue.Pop(ARRAY); waiting != nil {
 					uids := p.Depth.Decrease(ARRAY).Uids
@@ -505,9 +540,12 @@ func (p *Parser) Walk() (err error) {
 			case SCALAR:
 				p.State = PREDICATE
 				p.FoundValue(true)
+			case ARRAY_SCALAR:
+				p.State = ARRAY_SCALAR
+				p.FoundArrayVal(true)
 			case FACET_SCALAR:
 				p.State = PREDICATE
-				err = p.FoundScalarFacet(true)
+				err = p.FoundFacet(true)
 				if err != nil {
 					return err
 				}
@@ -521,9 +559,13 @@ func (p *Parser) Walk() (err error) {
 			case SCALAR:
 				p.State = PREDICATE
 				p.FoundValue(false)
+			case ARRAY_SCALAR:
+				// TODO: don't need to re-set p.State
+				p.State = ARRAY_SCALAR
+				p.FoundArrayVal(false)
 			case FACET_SCALAR:
 				p.State = PREDICATE
-				err = p.FoundScalarFacet(false)
+				err = p.FoundFacet(false)
 				if err != nil {
 					return err
 				}
@@ -538,9 +580,12 @@ func (p *Parser) Walk() (err error) {
 				p.State = PREDICATE
 				// int64 value is stored after the current node (i + 1)
 				p.FoundValue(int64(p.Parsed.Tape[i+1]))
+			case ARRAY_SCALAR:
+				p.State = ARRAY_SCALAR
+				p.FoundArrayVal(int64(p.Parsed.Tape[i+1]))
 			case FACET_SCALAR:
 				p.State = PREDICATE
-				err = p.FoundScalarFacet(p.Parsed.Tape[i+1])
+				err = p.FoundFacet(p.Parsed.Tape[i+1])
 				if err != nil {
 					return err
 				}
@@ -555,9 +600,12 @@ func (p *Parser) Walk() (err error) {
 				p.State = PREDICATE
 				// uint64 value is stored after the current node (i + 1)
 				p.FoundValue(p.Parsed.Tape[i+1])
+			case ARRAY_SCALAR:
+				p.State = ARRAY_SCALAR
+				p.FoundArrayVal(p.Parsed.Tape[i+1])
 			case FACET_SCALAR:
 				p.State = PREDICATE
-				err = p.FoundScalarFacet(p.Parsed.Tape[i+1])
+				err = p.FoundFacet(p.Parsed.Tape[i+1])
 				if err != nil {
 					return err
 				}
@@ -573,9 +621,12 @@ func (p *Parser) Walk() (err error) {
 				p.LogMore(fmt.Sprintf("found float %d", p.Parsed.Tape[i+1]))
 				// float64 value is stored after the current node (i + 1)
 				p.FoundValue(math.Float64frombits(p.Parsed.Tape[i+1]))
+			case ARRAY_SCALAR:
+				p.State = ARRAY_SCALAR
+				p.FoundArrayVal(math.Float64frombits(p.Parsed.Tape[i+1]))
 			case FACET_SCALAR:
 				p.State = PREDICATE
-				err = p.FoundScalarFacet(math.Float64frombits(p.Parsed.Tape[i+1]))
+				err = p.FoundFacet(math.Float64frombits(p.Parsed.Tape[i+1]))
 				if err != nil {
 					return err
 				}
@@ -585,6 +636,10 @@ func (p *Parser) Walk() (err error) {
 		p.Log(i, c, n)
 	}
 	return
+}
+
+func (p *Parser) FoundArrayVal(v interface{}) {
+	p.Depth.ArrayVal(v)
 }
 
 func (p *Parser) FoundUid(s string) {
@@ -608,7 +663,7 @@ func (p *Parser) FoundValue(v interface{}) {
 	p.Quad = NewQuad()
 }
 
-func (p *Parser) FoundScalarFacet(v interface{}) error {
+func (p *Parser) FoundFacet(v interface{}) error {
 	switch val := v.(type) {
 	case string:
 		if t, err := types.ParseTime(val); err == nil {
