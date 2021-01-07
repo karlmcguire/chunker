@@ -1,7 +1,6 @@
 package chunker
 
 import (
-	"encoding/binary"
 	"fmt"
 	"math"
 	"strings"
@@ -14,7 +13,6 @@ type FacetType uint8
 const (
 	STRING FacetType = iota
 	INT
-	UINT
 	FLOAT
 	BOOL
 	DATETIME
@@ -330,7 +328,6 @@ func (p *Parser) Walk() (err error) {
 					}
 					p.State = ARRAY
 					p.FoundSubject(ARRAY, p.Depth.Subject())
-				//case '"', 't', 'f', 'l', 'u', 'd':
 				default:
 					switch p.Quad.Predicate {
 					case "uid":
@@ -608,29 +605,29 @@ func (p *Parser) FoundValue(v interface{}) {
 	p.Quad = NewQuad()
 }
 
-// TODO: determining facet type, getting tokens, getting alias
 func (p *Parser) FoundScalarFacet(v interface{}) error {
 	switch val := v.(type) {
 	case string:
-		p.Facet.Value = []byte(val)
 		p.Facet.ValType = STRING
+		p.Facet.Value = []byte(val)
 	case int64:
-		var b [8]byte
-		binary.LittleEndian.PutUint64(b[:], uint64(val))
-		p.Facet.Value = b[:]
 		p.Facet.ValType = INT
-	case uint64:
-		var b [8]byte
-		binary.LittleEndian.PutUint64(b[:], val)
-		p.Facet.Value = b[:]
-		p.Facet.ValType = UINT
+		p.Facet.Value = []byte{
+			byte(0xff & val),
+			byte(0xff & (val >> 8)),
+			byte(0xff & (val >> 16)),
+			byte(0xff & (val >> 24)),
+			byte(0xff & (val >> 32)),
+			byte(0xff & (val >> 40)),
+			byte(0xff & (val >> 48)),
+			byte(0xff & (val >> 56))}
 	case bool:
-		b := []byte{0x00}
-		if val {
-			b[0] = 0x01
-		}
-		p.Facet.Value = b
 		p.Facet.ValType = BOOL
+		if val {
+			p.Facet.Value = []byte{0x01}
+		} else {
+			p.Facet.Value = []byte{0x00}
+		}
 	}
 	// search quads in reverse order for the facet predicate
 	for i := len(p.Quads) - 1; i > 0; i-- {
@@ -640,5 +637,6 @@ func (p *Parser) FoundScalarFacet(v interface{}) error {
 			break
 		}
 	}
+
 	return nil
 }
