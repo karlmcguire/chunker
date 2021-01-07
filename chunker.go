@@ -72,6 +72,7 @@ const (
 	FACET
 	FACET_SCALAR
 	FACET_MAP
+	FACET_ARRAY
 	UID
 	GEO
 )
@@ -94,6 +95,8 @@ func (s ParserState) String() string {
 		return "FACET"
 	case FACET_SCALAR:
 		return "FACET_SCALAR"
+	case FACET_ARRAY:
+		return "FACET_ARRAY"
 	case FACET_MAP:
 		return "FACET_MAP"
 	case UID:
@@ -338,14 +341,15 @@ func (p *Parser) Walk() (err error) {
 				switch n {
 				case '{':
 					if p.State == FACET {
-						p.LogMore("found facet object")
+						p.State = FACET_MAP
+						p.Quad = NewQuad()
+						p.Facet.Pred = keys[0]
+						p.Facet.Key = keys[1]
+					} else {
+						p.State = OBJECT
+						p.FoundSubject(OBJECT, p.Depth.Subject())
 					}
-					p.State = OBJECT
-					p.FoundSubject(OBJECT, p.Depth.Subject())
 				case '[':
-					if p.State == FACET {
-						p.LogMore("found facet array")
-					}
 					p.State = ARRAY
 					p.FoundSubject(ARRAY, p.Depth.Subject())
 				default:
@@ -358,7 +362,6 @@ func (p *Parser) Walk() (err error) {
 						if p.State == FACET {
 							p.State = FACET_SCALAR
 							p.Quad = NewQuad()
-							p.State = FACET_SCALAR
 							p.Facet.Pred = keys[0]
 							p.Facet.Key = keys[1]
 						} else {
@@ -401,6 +404,9 @@ func (p *Parser) Walk() (err error) {
 				if err != nil {
 					return err
 				}
+
+			case FACET_MAP:
+				p.LogMore(s)
 			}
 
 		// array open
@@ -487,7 +493,12 @@ func (p *Parser) Walk() (err error) {
 			case '[':
 				p.State = ARRAY
 			case '"':
-				p.State = PREDICATE
+				switch p.State {
+				case FACET_MAP:
+					p.State = FACET_MAP
+				default:
+					p.State = PREDICATE
+				}
 			}
 
 		// object close
@@ -661,6 +672,9 @@ func (p *Parser) FoundValue(v interface{}) {
 	p.Quad.ObjectVal = v
 	p.Quads = append(p.Quads, p.Quad)
 	p.Quad = NewQuad()
+}
+
+func (p *Parser) FoundFacetId(s string) {
 }
 
 func (p *Parser) FoundFacet(v interface{}) error {
