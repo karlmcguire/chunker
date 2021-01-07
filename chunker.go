@@ -570,6 +570,7 @@ func (p *Parser) Walk() (err error) {
 			switch p.State {
 			case SCALAR:
 				p.State = PREDICATE
+				p.LogMore(fmt.Sprintf("found float %d", p.Parsed.Tape[i+1]))
 				// float64 value is stored after the current node (i + 1)
 				p.FoundValue(math.Float64frombits(p.Parsed.Tape[i+1]))
 			case FACET_SCALAR:

@@ -73,12 +73,12 @@ func (c *Case) Test(t *testing.T, logs bool) {
 			}
 		case "float64":
 			if quad.ObjectVal.(float64) != c.Quads[i].ObjectVal.(float64) {
-				t.Fatalf("expected %f objectVal for quad %d but got %f\n",
-					c.Quads[i].ObjectVal.(float64), i, quad.ObjectVal.(float64))
+				t.Fatalf("expected %f objectVal for quad %s but got %f\n",
+					c.Quads[i].ObjectVal.(float64), quad.Subject, quad.ObjectVal.(float64))
 			}
 		case "bool":
 			if quad.ObjectVal.(bool) != c.Quads[i].ObjectVal.(bool) {
-				t.Fatalf("expected %v objectVal for quad %d but got %v\n",
+				t.Fatalf("expected %v objectVal for quad %d got %v\n",
 					c.Quads[i].ObjectVal.(bool), i, quad.ObjectVal.(bool))
 			}
 		default:
@@ -92,9 +92,9 @@ func TestNumbers(t *testing.T) {
 	cases := []*Case{
 		{
 			Json: []byte(`{
-				"uid": "1",
-				"key": 9223372036854775299
-			}`),
+						"uid": "1",
+						"key": 9223372036854775299
+					}`),
 			Quads: []*Quad{{
 				Subject:   "1",
 				Predicate: "key",
@@ -103,9 +103,9 @@ func TestNumbers(t *testing.T) {
 		},
 		{
 			Json: []byte(`{
-				"uid": "2",
-				"key": 9223372036854775299.0
-			}`),
+						"uid": "2",
+						"key": 9223372036854775299.0
+					}`),
 			Quads: []*Quad{{
 				Subject:   "2",
 				Predicate: "key",
@@ -121,9 +121,9 @@ func TestNumbers(t *testing.T) {
 		},
 		{
 			Json: []byte(`{
-				"uid": "4",
-				"key": "23452786"
-			}`),
+						"uid": "4",
+						"key": "23452786"
+					}`),
 			Quads: []*Quad{{
 				Subject:   "4",
 				Predicate: "key",
@@ -132,9 +132,9 @@ func TestNumbers(t *testing.T) {
 		},
 		{
 			Json: []byte(`{
-				"uid": "5",
-				"key": "23452786.2378"
-			}`),
+						"uid": "5",
+						"key": "23452786.2378"
+					}`),
 			Quads: []*Quad{{
 				Subject:   "5",
 				Predicate: "key",
@@ -143,9 +143,9 @@ func TestNumbers(t *testing.T) {
 		},
 		{
 			Json: []byte(`{
-				"uid": "6",
-				"key": -1e10
-			}`),
+						"uid": "6",
+						"key": -1e10
+					}`),
 			Quads: []*Quad{{
 				Subject:   "6",
 				Predicate: "key",
@@ -154,9 +154,9 @@ func TestNumbers(t *testing.T) {
 		},
 		{
 			Json: []byte(`{
-				"uid": "7",
-				"key": 0E-0
-			}`),
+						"uid": "7",
+						"key": 0E-0
+					}`),
 			Quads: []*Quad{{
 				Subject:   "7",
 				Predicate: "key",
