@@ -102,6 +102,19 @@ func (c *Case) Test(t *testing.T, logs bool) {
 					t.Fatalf("expected %v value for quad %d facet %d but got %v\n",
 						c.Quads[i].Facets[j].Value, i, j, facet.Value)
 				}
+				// check facet tokens
+				if len(c.Quads[i].Facets[j].Tokens) > 0 {
+					if facet.Tokens == nil || len(facet.Tokens) == 0 {
+						t.Fatalf("expected tokens for quad %d facet %d but found none\n",
+							i, j)
+					}
+					for k, token := range facet.Tokens {
+						if token != c.Quads[i].Facets[j].Tokens[k] {
+							t.Fatalf("expected token '%s' for quad %d facet %d but found '%s'\n",
+								c.Quads[i].Facets[j].Tokens[k], i, j, token)
+						}
+					}
+				}
 			}
 		}
 	}
@@ -112,9 +125,9 @@ func TestNumbers(t *testing.T) {
 	cases := []*Case{
 		{
 			Json: []byte(`{
-						"uid": "1",
-						"key": 9223372036854775299
-					}`),
+				"uid": "1",
+				"key": 9223372036854775299
+			}`),
 			Quads: []*Quad{{
 				Subject:   "1",
 				Predicate: "key",
@@ -123,9 +136,9 @@ func TestNumbers(t *testing.T) {
 		},
 		{
 			Json: []byte(`{
-						"uid": "2",
-						"key": 9223372036854775299.0
-					}`),
+				"uid": "2",
+				"key": 9223372036854775299.0
+			}`),
 			Quads: []*Quad{{
 				Subject:   "2",
 				Predicate: "key",
@@ -141,9 +154,9 @@ func TestNumbers(t *testing.T) {
 		},
 		{
 			Json: []byte(`{
-						"uid": "4",
-						"key": "23452786"
-					}`),
+				"uid": "4",
+				"key": "23452786"
+			}`),
 			Quads: []*Quad{{
 				Subject:   "4",
 				Predicate: "key",
@@ -152,9 +165,9 @@ func TestNumbers(t *testing.T) {
 		},
 		{
 			Json: []byte(`{
-						"uid": "5",
-						"key": "23452786.2378"
-					}`),
+				"uid": "5",
+				"key": "23452786.2378"
+			}`),
 			Quads: []*Quad{{
 				Subject:   "5",
 				Predicate: "key",
@@ -163,9 +176,9 @@ func TestNumbers(t *testing.T) {
 		},
 		{
 			Json: []byte(`{
-						"uid": "6",
-						"key": -1e10
-					}`),
+				"uid": "6",
+				"key": -1e10
+			}`),
 			Quads: []*Quad{{
 				Subject:   "6",
 				Predicate: "key",
@@ -174,9 +187,9 @@ func TestNumbers(t *testing.T) {
 		},
 		{
 			Json: []byte(`{
-						"uid": "7",
-						"key": 0E-0
-					}`),
+				"uid": "7",
+				"key": 0E-0
+			}`),
 			Quads: []*Quad{{
 				Subject:   "7",
 				Predicate: "key",
@@ -189,39 +202,7 @@ func TestNumbers(t *testing.T) {
 	}
 }
 
-// TODO
 func TestFacets1(t *testing.T) {
-	/*
-		TODO: this is the correct output, the case should match this:
-
-		predicate:"mobile" object_value:<str_val:"040123456" >
-
-		    facets:<key:"operation"
-					value:"READ WRITE"
-					tokens:"\001read"
-					tokens:"\001write" > )
-
-
-		predicate:"car" object_value:<str_val:"MA0123" >
-
-		    facets:<key:"age"
-					value:"\003\000\000\000\000\000\000\000"
-					val_type:INT >
-
-		    facets:<key:"price"
-					value:"q=\n\327#L\335@"
-					val_type:FLOAT >
-
-		    facets:<key:"since"
-					value:"\001\000\000\000\016\273K7\345\000\000\000\000\377\377"
-					val_type:DATETIME >
-
-		    facets:<key:"first" value:"\001" val_type:BOOL > ),
-
-
-		predicate:"name" object_value:<str_val:"Alice" > )
-	*/
-
 	c := &Case{
 		Json: []byte(`[{
 			"name": "Alice",
@@ -247,6 +228,7 @@ func TestFacets1(t *testing.T) {
 				Key:     "operation",
 				Value:   []byte(`READ WRITE`),
 				ValType: STRING,
+				Tokens:  []string{"\x01read", "\x01write"},
 			}},
 		}, {
 			Subject:   "c.1",

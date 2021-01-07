@@ -6,6 +6,7 @@ import (
 	"math"
 	"strings"
 
+	"github.com/dgraph-io/dgraph/tok"
 	"github.com/dgraph-io/dgraph/types"
 	json "github.com/minio/simdjson-go"
 )
@@ -620,6 +621,13 @@ func (p *Parser) FoundScalarFacet(v interface{}) error {
 		} else {
 			p.Facet.ValType = STRING
 			p.Facet.Value = []byte(val)
+
+			t, err := tok.GetTermTokens([]string{val})
+			if err != nil {
+				return err
+			}
+
+			p.Facet.Tokens = t
 		}
 	case int64:
 		p.Facet.ValType = INT
