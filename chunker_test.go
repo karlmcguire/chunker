@@ -85,20 +85,22 @@ func (c *Case) Test(t *testing.T, logs bool) {
 		default:
 			t.Fatal("objectVal type not handled")
 		}
-
+		// check facets
 		if len(c.Quads[i].Facets) > 0 {
 			if quad.Facets == nil || len(quad.Facets) == 0 {
-				t.Fatal("expected facets for quad, but found none")
+				t.Fatalf("expected facets for quad %d, but found none\n", i)
 			}
-
 			for j, facet := range quad.Facets {
 				if facet.ValType != c.Quads[i].Facets[j].ValType {
-					t.Fatalf("expected %s valType for facet %d but got %s\n",
-						c.Quads[i].Facets[j].ValType.String(), j, facet.ValType.String())
+					spew.Dump(facet)
+					spew.Dump(c.Quads[i].Facets[j])
+					t.Fatalf("expected %s valType for quad %d facet %d but got %s\n",
+						c.Quads[i].Facets[j].ValType.String(), i, j, facet.ValType.String())
 				}
 				if !bytes.Equal(facet.Value, c.Quads[i].Facets[j].Value) {
-					t.Fatalf("expected %v value for facet %d but got %v\n",
-						c.Quads[i].Facets[j].Value, j, facet.Value)
+					spew.Dump(facet)
+					t.Fatalf("expected %v value for quad %d facet %d but got %v\n",
+						c.Quads[i].Facets[j].Value, i, j, facet.Value)
 				}
 			}
 		}
@@ -256,12 +258,17 @@ func TestFacets1(t *testing.T) {
 				Value:   []byte{0x01},
 				ValType: BOOL,
 			}, {
-				Key:     "age",
-				Value:   []byte{0x03},
+				Key: "age",
+				Value: []byte{
+					0x03, 0x00, 0x00, 0x00,
+					0x00, 0x00, 0x00, 0x00},
 				ValType: INT,
 			}, {
-				Key:     "price",
-				Value:   []byte{},
+				Key: "price",
+				Value: []byte{
+					0x71, 0x3d, 0x0a, 0xd7,
+					0x23, 0x4c, 0xdd, 0x40,
+				},
 				ValType: FLOAT,
 			}, {
 				Key:     "since",

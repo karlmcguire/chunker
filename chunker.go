@@ -1,6 +1,7 @@
 package chunker
 
 import (
+	"encoding/binary"
 	"fmt"
 	"math"
 	"strings"
@@ -621,6 +622,22 @@ func (p *Parser) FoundScalarFacet(v interface{}) error {
 			byte(0xff & (val >> 40)),
 			byte(0xff & (val >> 48)),
 			byte(0xff & (val >> 56))}
+	case uint64:
+		p.Facet.ValType = INT
+		p.Facet.Value = make([]byte, 8)
+		binary.LittleEndian.PutUint64(p.Facet.Value, val)
+	case float64:
+		p.Facet.ValType = FLOAT
+		n := math.Float64bits(val)
+		p.Facet.Value = []byte{
+			byte(0xff & n),
+			byte(0xff & (n >> 8)),
+			byte(0xff & (n >> 16)),
+			byte(0xff & (n >> 24)),
+			byte(0xff & (n >> 32)),
+			byte(0xff & (n >> 40)),
+			byte(0xff & (n >> 48)),
+			byte(0xff & (n >> 56))}
 	case bool:
 		p.Facet.ValType = BOOL
 		if val {
