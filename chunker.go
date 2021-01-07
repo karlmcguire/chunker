@@ -6,6 +6,7 @@ import (
 	"math"
 	"strings"
 
+	"github.com/dgraph-io/dgraph/types"
 	json "github.com/minio/simdjson-go"
 )
 
@@ -609,8 +610,17 @@ func (p *Parser) FoundValue(v interface{}) {
 func (p *Parser) FoundScalarFacet(v interface{}) error {
 	switch val := v.(type) {
 	case string:
-		p.Facet.ValType = STRING
-		p.Facet.Value = []byte(val)
+		if t, err := types.ParseTime(val); err == nil {
+			p.Facet.ValType = DATETIME
+			b, err := t.MarshalBinary()
+			if err != nil {
+				return err
+			}
+			p.Facet.Value = b
+		} else {
+			p.Facet.ValType = STRING
+			p.Facet.Value = []byte(val)
+		}
 	case int64:
 		p.Facet.ValType = INT
 		p.Facet.Value = []byte{

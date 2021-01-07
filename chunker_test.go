@@ -271,13 +271,17 @@ func TestFacets1(t *testing.T) {
 				},
 				ValType: FLOAT,
 			}, {
-				Key:     "since",
-				Value:   []byte{},
+				Key: "since",
+				Value: []byte{
+					0x01, 0x00, 0x00, 0x00,
+					0x0e, 0xbb, 0x4b, 0x37,
+					0xe5, 0x00, 0x00, 0x00,
+					0x00, 0xff, 0xff},
 				ValType: DATETIME,
 			}},
 		}},
 	}
-	c.Test(t, true)
+	c.Test(t, false)
 }
 
 func Test1(t *testing.T) {
