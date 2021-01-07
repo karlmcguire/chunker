@@ -1,105 +1,44 @@
 # chunker
 
-## 1: nquad
-```
+## 1. nquad
+
+### 1.1. basic
+
+```json
 {
     "name": "alice"
 }
+```
 
+```
   subject: "c.1"
 predicate: "name"
- objectId:
+ objectId: 
 objectVal: "alice"
-   facets: []
 ```
 
-## 2: nquad empty
+### 1.2. empty
 
-```
+```json
 {
-    "friend": {}
+    "name": null
 }
-
-<no nquads found>
 ```
 
-## 3: nquad object
-
-```
+```json
 {
-    "friend": {
-        "name": "charlie"
-    }
+    "name": {}
 }
-
-  subject: "c.1"
-predicate: "friend"
- objectId: "c.2"
-objectVal: 
-   facets: []
-
-  subject: "c.2"
-predicate: "name"
- objectId: 
-objectVal: "charlie"
-   facets: []
 ```
 
-### 4: nquad array objects
-
-```
+```json
 {
-    "friend": [{
-        "name": "charlie"
-    }, {
-        "name": "joshua"
-    }]
+    "name": []
 }
-
-  subject: "c.1"
-predicate: "friend"
- objectId: "c.2"
-objectVal:
-   facets: []
-
-  subject: "c.1"
-predicate: "friend"
- objectId: "c.3"
-objectVal: 
-   facets: []
-
-  subject: "c.2"
-predicate: "name"
- objectId:
-objectVal: "charlie"
-   facets: []
-
-  subject: "c.3"
-predicate: "name"
- objectId: 
-objectVal: "joshua"
-   facets: []
 ```
 
-### 5: nquad object uid
-
 ```
-{
-    "friend": {
-        "uid": "1000",
-        "name": "charlie"
-    }
-}
-
-  subject: "c.1"
-predicate: "friend"
- objectId: "1000"
-objectVal:
-   facets: []
-
-  subject: "1000"
-predicate: "name"
- objectId:
-objectVal: "charlie"
-   facets: []
+(no nquads found)
 ```
+
+## 2. facet
