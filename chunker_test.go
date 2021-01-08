@@ -10,15 +10,10 @@ func Test(t *testing.T) {
 	p := NewParser()
 	if err := p.Run([]byte(`{
 		"name": "karl",
-		"friend": [
-			{
-				"uid": "1000",
-				"name": "sarah"
-			},
-			{
-				"name": "megan"
-			}
-		]
+		"friend": {
+			"uid": "10000",
+			"name": "charlie"
+		}
 	}`)); err != nil {
 		t.Fatal(err)
 	}
@@ -26,8 +21,6 @@ func Test(t *testing.T) {
 }
 
 func Benchmark(b *testing.B) {
-	p := NewParser()
-
 	d := []byte(`{
 		"createDatetime":"xxxxxxxxxx",
 		"final_individ":"xxxxxxxxxx",
@@ -150,6 +143,6 @@ func Benchmark(b *testing.B) {
 
 	b.SetBytes(125)
 	for n := 0; n < b.N; n++ {
-		p.Run(d)
+		NewParser().Run(d)
 	}
 }
