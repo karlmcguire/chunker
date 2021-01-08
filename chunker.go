@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"math"
 
-	"github.com/davecgh/go-spew/spew"
 	json "github.com/minio/simdjson-go"
 )
 
@@ -61,14 +60,11 @@ func (p *Parser) Run(d []byte) error {
 	p.Objects = make([]*Quad, 0)
 	p.Arrays = make([]*Quad, 0)
 	p.ArrayUids = make([]string, 0)
-
 	for state := p.Root; state != nil; {
 		if state, err = state(); err != nil {
 			return err
 		}
 	}
-
-	spew.Dump(p.ArrayUids)
 	return nil
 }
 
@@ -228,6 +224,9 @@ func (p *Parser) ObjectValue() (ParserState, error) {
 			return p.Uid, nil
 		}
 		p.Quad.Subject = getNextUid()
+		if len(p.Objects) > 0 {
+			p.Objects[len(p.Objects)-1].ObjectId = p.Quad.Subject
+		}
 		return p.Value, nil
 	}
 
@@ -242,6 +241,9 @@ func (p *Parser) Uid() (ParserState, error) {
 		p.Quad.Subject = p.String()
 		if len(p.Arrays) > 0 {
 			p.ArrayUids = append(p.ArrayUids, p.Quad.Subject)
+		}
+		if len(p.Objects) > 0 {
+			p.Objects[len(p.Objects)-1].ObjectId = p.Quad.Subject
 		}
 		return p.Scan, nil
 	default:
@@ -259,9 +261,7 @@ func (p *Parser) Scan() (ParserState, error) {
 		return p.Object, nil
 	case '}':
 		if len(p.Objects) > 0 {
-			objectId := p.Quad.Subject
 			p.Quad, p.Objects = p.Objects[len(p.Objects)-1], p.Objects[:len(p.Objects)-1]
-			p.Quad.ObjectId = objectId
 			p.Quads = append(p.Quads, p.Quad)
 			p.Quad = &Quad{}
 		}
