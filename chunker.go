@@ -114,10 +114,10 @@ func (p *Parser) Root() (ParserState, error) {
 
 	switch byte(n >> 56) {
 	case '{':
-		p.Deeper(OBJECT, nil)
+		p.Deeper(OBJECT, p.Quad)
 		return p.Object, nil
 	case '[':
-		p.Deeper(ARRAY, nil)
+		p.Deeper(ARRAY, p.Quad)
 		return p.Array, nil
 	}
 
@@ -171,14 +171,12 @@ func (p *Parser) Value() (ParserState, error) {
 
 	switch byte(n >> 56) {
 	case '{':
-		s := p.Quad.Subject
 		p.Deeper(OBJECT, p.Quad)
-		p.Quad = &Quad{Subject: s}
+		p.Quad = &Quad{}
 		return p.Object, nil
 	case '[':
-		s := p.Quad.Subject
 		p.Deeper(ARRAY, p.Quad)
-		p.Quad = &Quad{Subject: s}
+		p.Quad = &Quad{}
 		return p.Array, nil
 	case '"':
 		p.Quad.ObjectVal = p.String()
@@ -215,21 +213,25 @@ func (p *Parser) LookForPredicate() (ParserState, error) {
 	switch byte(n >> 56) {
 	case '}':
 		l := p.Pop()
-		if l != nil {
-			if l.Quad != nil {
-				p.Quads = append(p.Quads, &Quad{
-					Subject:   p.Subject(),
-					Predicate: l.Quad.Predicate,
-					ObjectId:  l.Quad.Subject,
-				})
-			}
+		if l != nil && l.Quad != nil && l.Quad.ObjectVal == nil {
+			p.Quads = append(p.Quads, &Quad{
+				Subject:   p.Subject(),
+				Predicate: l.Quad.Predicate,
+				ObjectId:  l.Quad.Subject,
+			})
 		}
 		return p.LookForPredicate, nil
 	case ']':
+		// TODO
 		return p.LookForPredicate, nil
 	case '"':
 		p.Quad.Predicate = p.String()
-		p.Quad.Subject = p.Subject()
+		if p.Quad.Subject == "" {
+			p.Quad.Subject = p.Subject()
+		}
+		if p.Quad.Subject == "" {
+			p.Quad.Subject = getNextUid()
+		}
 		return p.Value, nil
 	}
 

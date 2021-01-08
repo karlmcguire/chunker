@@ -12,7 +12,8 @@ func Test(t *testing.T) {
 		"name": "karl",
 		"friend": {
 			"uid": "10000",
-			"name": "charlie"
+			"name": "charlie",
+			"something": "more"
 		}
 	}`)); err != nil {
 		t.Fatal(err)
