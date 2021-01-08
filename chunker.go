@@ -1,9 +1,11 @@
 package chunker
 
 import (
+	"errors"
 	"fmt"
 	"math"
 
+	"github.com/davecgh/go-spew/spew"
 	json "github.com/minio/simdjson-go"
 )
 
@@ -29,6 +31,7 @@ type Parser struct {
 	Quad      *Quad
 	Objects   []*Quad
 	Arrays    []*Quad
+	ArrayUids []string
 
 	Quads []*Quad
 
@@ -37,10 +40,11 @@ type Parser struct {
 
 func NewParser() *Parser {
 	return &Parser{
-		Quad:    &Quad{},
-		Objects: make([]*Quad, 0),
-		Arrays:  make([]*Quad, 0),
-		Quads:   make([]*Quad, 0),
+		Quad:      &Quad{},
+		Objects:   make([]*Quad, 0),
+		Arrays:    make([]*Quad, 0),
+		ArrayUids: make([]string, 0),
+		Quads:     make([]*Quad, 0),
 	}
 }
 
@@ -56,12 +60,15 @@ func (p *Parser) Run(d []byte) error {
 	p.Quad = &Quad{}
 	p.Objects = make([]*Quad, 0)
 	p.Arrays = make([]*Quad, 0)
+	p.ArrayUids = make([]string, 0)
 
 	for state := p.Root; state != nil; {
 		if state, err = state(); err != nil {
 			return err
 		}
 	}
+
+	spew.Dump(p.ArrayUids)
 	return nil
 }
 
@@ -95,9 +102,17 @@ func (p *Parser) Object() (ParserState, error) {
 
 	switch byte(n >> 56) {
 	case '}':
+		return p.Scan, nil
 	case '"':
-		p.Quad.Subject = getNextUid()
 		p.Quad.Predicate = p.String()
+		if p.Quad.Predicate == "uid" {
+			p.Quad.Predicate = ""
+			return p.Uid, nil
+		}
+		p.Quad.Subject = getNextUid()
+		if len(p.Arrays) > 0 {
+			p.ArrayUids = append(p.ArrayUids, p.Quad.Subject)
+		}
 		return p.Value, nil
 	}
 
@@ -171,8 +186,20 @@ func (p *Parser) ArrayValue() (ParserState, error) {
 
 	switch byte(c >> 56) {
 	case '{':
+		return p.Object, nil
+	case '}':
 	case '[':
+	case ']':
+		p.Quad.Subject = p.Arrays[len(p.Arrays)-1].Subject
+		p.Arrays = p.Arrays[:len(p.Arrays)-1]
+		return p.Scan, nil
 	case '"':
+		p.Quads = append(p.Quads, &Quad{
+			Subject:   p.Arrays[len(p.Arrays)-1].Subject,
+			Predicate: p.Arrays[len(p.Arrays)-1].Predicate,
+			ObjectVal: p.String(),
+		})
+		return p.ArrayValue, nil
 	case 'l':
 	case 'u':
 	case 'd':
@@ -213,7 +240,12 @@ func (p *Parser) Uid() (ParserState, error) {
 	switch byte(c >> 56) {
 	case '"':
 		p.Quad.Subject = p.String()
+		if len(p.Arrays) > 0 {
+			p.ArrayUids = append(p.ArrayUids, p.Quad.Subject)
+		}
 		return p.Scan, nil
+	default:
+		return nil, errors.New("expecting a uid")
 	}
 
 	return nil, nil
@@ -223,9 +255,8 @@ func (p *Parser) Scan() (ParserState, error) {
 	c := p.Data.Tape[p.Next()]
 
 	switch byte(c >> 56) {
-	case '"':
-		p.Quad.Predicate = p.String()
-		return p.Value, nil
+	case '{':
+		return p.Object, nil
 	case '}':
 		if len(p.Objects) > 0 {
 			objectId := p.Quad.Subject
@@ -234,7 +265,24 @@ func (p *Parser) Scan() (ParserState, error) {
 			p.Quads = append(p.Quads, p.Quad)
 			p.Quad = &Quad{}
 		}
-		return nil, nil
+		return p.Scan, nil
+	case '[':
+	case ']':
+		if len(p.Arrays) > 0 {
+			p.Quad, p.Arrays = p.Arrays[len(p.Arrays)-1], p.Arrays[:len(p.Arrays)-1]
+			for len(p.ArrayUids) > 0 {
+				p.Quads = append(p.Quads, &Quad{
+					Subject:   p.Quad.Subject,
+					Predicate: p.Quad.Predicate,
+					ObjectId:  p.ArrayUids[len(p.ArrayUids)-1],
+				})
+				p.ArrayUids = p.ArrayUids[:len(p.ArrayUids)-1]
+			}
+		}
+		return p.Scan, nil
+	case '"':
+		p.Quad.Predicate = p.String()
+		return p.Value, nil
 	}
 
 	return nil, nil
