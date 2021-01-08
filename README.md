@@ -6,11 +6,11 @@
     + [1.3. object pointer](#13-object-pointer)
     + [1.4. array](#14-array)
         - [1.4.1. array pointer](#141-array-pointer)
-    + [1.6. uid](#16-uid)
-        - [1.6.1. uid pointer](#161-uid-pointer)
+    + [1.5. uid](#15-uid)
+        - [1.5.1. uid pointer](#151-uid-pointer)
 * [2. facet](#2-facet)
     + [2.1. scalar](#21-scalar)
-    + [2.1.1 scalar array pointer](#211-scalar-array-pointer)
+        - [2.1.1 scalar array pointer](#211-scalar-array-pointer)
     + [2.2. map](#22-map)
 
 ## 1. nquad
@@ -143,7 +143,7 @@ objectVal:
    facets:
 ```
 
-### 1.6. uid
+### 1.5. uid
 
 ```json
 {
@@ -160,7 +160,7 @@ objectVal: "charlie"
    facets:
 ```
 
-#### 1.6.1. uid pointer
+#### 1.5.1. uid pointer
 
 ```json
 {
