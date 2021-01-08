@@ -10,6 +10,7 @@
         - [1.6.1. uid pointer](#161-uid-pointer)
 * [2. facet](#2-facet)
     + [2.1. scalar](#21-scalar)
+    + [2.1.1 scalar array pointer](#211-scalar-array-pointer)
     + [2.2. map](#22-map)
 
 ## 1. nquad
