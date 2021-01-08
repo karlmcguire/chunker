@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"math"
 
+	"github.com/davecgh/go-spew/spew"
 	json "github.com/minio/simdjson-go"
 )
 
@@ -20,6 +21,8 @@ func getNextUid() string {
 	nextUid++
 	return fmt.Sprintf("c.%d", nextUid)
 }
+
+////////////////////////////////////////////////////////////////////////////////
 
 type LevelType uint8
 
@@ -44,14 +47,43 @@ type Level struct {
 }
 
 type Levels struct {
-	Levels [][]*Level
+	Levels []*Level
 }
 
 func NewLevels() *Levels {
 	return &Levels{
-		Levels: make([][]*Level, 0),
+		Levels: make([]*Level, 0),
 	}
 }
+
+func (l *Levels) String() string {
+	return spew.Sdump(l.Levels)
+}
+
+func (l *Levels) Add(t LevelType, q *Quad) {
+	l.Levels = append(l.Levels, &Level{t, q})
+}
+
+func (l *Levels) Uid(uid string) {
+}
+
+func (l *Levels) Pop() *Level {
+	if len(l.Levels) <= 0 {
+		return nil
+	}
+	level := l.Levels[len(l.Levels)-1]
+	l.Levels = l.Levels[:len(l.Levels)-1]
+	return level
+}
+
+func (l *Levels) Top() *Level {
+	if len(l.Levels) <= 0 {
+		return nil
+	}
+	return l.Levels[len(l.Levels)-1]
+}
+
+////////////////////////////////////////////////////////////////////////////////
 
 type ParserState func() (ParserState, error)
 
@@ -79,13 +111,15 @@ func (p *Parser) Run(d []byte) error {
 	}
 	p.Data = parsed
 	for state := p.Root; state != nil; {
-		fmt.Println(p.Log())
+		//fmt.Println(p.Levels)
 		if state, err = state(); err != nil {
 			return err
 		}
 	}
 	return nil
 }
+
+////////////////////////////////////////////////////////////////////////////////
 
 func (p *Parser) Next() uint64 {
 	p.Pos++
@@ -100,34 +134,17 @@ func (p *Parser) String() string {
 	return s
 }
 
-func (p *Parser) Log() string {
-	o := " "
-	for _, level := range p.Levels {
-		o += level.Type.String() + " "
-	}
-	return o[:len(o)-1]
-}
-
-func (p *Parser) Deeper(t LevelType, q *Quad) {
-	p.Levels = append(p.Levels, &Level{t, q})
-}
-
-func (p *Parser) Level() *Level {
-	if len(p.Levels) <= 0 {
-		return nil
-	}
-	return p.Levels[len(p.Levels)-1]
-}
+////////////////////////////////////////////////////////////////////////////////
 
 func (p *Parser) Root() (ParserState, error) {
 	n := p.Data.Tape[p.Next()]
 
 	switch byte(n >> 56) {
 	case '{':
-		p.Deeper(OBJECT, p.Quad)
+		p.Levels.Add(OBJECT, nil)
 		return p.Object, nil
 	case '[':
-		p.Deeper(ARRAY, p.Quad)
+		p.Levels.Add(ARRAY, nil)
 		return p.Array, nil
 	}
 
@@ -139,7 +156,7 @@ func (p *Parser) Uid() (ParserState, error) {
 
 	switch byte(n >> 56) {
 	case '"':
-		p.Level().Quad.Subject = p.String()
+		p.Levels.Uid(p.String())
 		return p.LookForPredicate, nil
 	}
 
@@ -169,7 +186,7 @@ func (p *Parser) Array() (ParserState, error) {
 
 	switch byte(n >> 56) {
 	case '{':
-		p.Deeper(OBJECT, p.Quad)
+		p.Levels.Add(OBJECT, p.Quad)
 		return p.Object, nil
 	}
 
@@ -181,11 +198,11 @@ func (p *Parser) Value() (ParserState, error) {
 
 	switch byte(n >> 56) {
 	case '{':
-		p.Deeper(OBJECT, p.Quad)
+		p.Levels.Add(OBJECT, p.Quad)
 		p.Quad = &Quad{}
 		return p.Object, nil
 	case '[':
-		p.Deeper(ARRAY, p.Quad)
+		p.Levels.Add(ARRAY, p.Quad)
 		p.Quad = &Quad{}
 		return p.Array, nil
 	case '"':
@@ -222,26 +239,35 @@ func (p *Parser) LookForPredicate() (ParserState, error) {
 
 	switch byte(n >> 56) {
 	case '{':
-		p.Deeper(OBJECT, p.Quad)
-		p.Quad = &Quad{}
+		p.Levels.Add(OBJECT, p.Quad)
 		return p.Object, nil
 	case '}':
-		l := p.Pop()
-		if l != nil && l.Quad != nil && l.Quad.ObjectVal == nil {
+		l := p.Levels.Pop()
+		fmt.Printf("closing object: %d %v\n", len(p.Levels.Levels), p.Levels.Top())
+		spew.Dump(l)
+		fmt.Println()
+		fmt.Println()
+		fmt.Println()
+		if a := p.Levels.Top(); a != nil && a.Type == ARRAY {
 			p.Quads = append(p.Quads, &Quad{
-				Subject:   p.Subject(),
-				Predicate: l.Quad.Predicate,
+				Subject:   a.Quad.Subject,
+				Predicate: a.Quad.Predicate,
 				ObjectId:  l.Quad.Subject,
 			})
 		}
 		return p.LookForPredicate, nil
 	case ']':
-		// TODO
+		l := p.Levels.Pop()
+		fmt.Printf("closing array: %d\n", len(p.Levels.Levels))
+		spew.Dump(l)
+		fmt.Println()
+		fmt.Println()
+		fmt.Println()
 		return p.LookForPredicate, nil
 	case '"':
 		p.Quad.Predicate = p.String()
 		if p.Quad.Subject == "" {
-			p.Quad.Subject = p.Subject()
+			p.Quad.Subject = "xxxxxxx"
 		}
 		if p.Quad.Subject == "" {
 			p.Quad.Subject = getNextUid()
@@ -250,24 +276,4 @@ func (p *Parser) LookForPredicate() (ParserState, error) {
 	}
 
 	return nil, nil
-}
-
-func (p *Parser) Subject() string {
-	if len(p.Levels) <= 0 {
-		return ""
-	}
-	l := p.Level()
-	if l.Quad == nil {
-		return ""
-	}
-	return l.Quad.Subject
-}
-
-func (p *Parser) Pop() *Level {
-	if len(p.Levels) <= 0 {
-		return nil
-	}
-	l := p.Levels[len(p.Levels)-1]
-	p.Levels = p.Levels[:len(p.Levels)-1]
-	return l
 }
