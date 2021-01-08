@@ -1,15 +1,14 @@
 # chunker
 
-- [chunker](#chunker)
-  * [1. nquad](#1-nquad)
+* [1. nquad](#1-nquad)
     + [1.1. basic](#11-basic)
     + [1.2. empty](#12-empty)
     + [1.3. object pointer](#13-object-pointer)
     + [1.4. array](#14-array)
-      - [1.4.1. array pointer](#141-array-pointer)
+        - [1.4.1. array pointer](#141-array-pointer)
     + [1.6. uid](#16-uid)
-      - [1.6.1. uid pointer](#161-uid-pointer)
-  * [2. facet](#2-facet)
+        - [1.6.1. uid pointer](#161-uid-pointer)
+* [2. facet](#2-facet)
     + [2.1. scalar](#21-scalar)
     + [2.2. map](#22-map)
 
