@@ -188,4 +188,99 @@ objectVal: "charlie"
 
 ### 2.1. scalar
 
+```json
+{
+    "friend": "charlie",
+    "friend|close": true
+}
+```
+
+```
+  subject: "c.1"
+predicate: "friend"
+ objectId: 
+objectVal: "charlie"
+   facets: [
+        key: "close",
+        val: []byte{0x01},
+    valType: bool
+   ]
+```
+
+### 2.1.1 scalar array pointer
+
+```json
+{
+    "name": "alice",
+    "friend": [
+        {
+            "name": "charlie",
+            "friend|close": true
+        }
+    ]
+}
+```
+
+```
+  subject: "c.1"
+predicate: "name"
+ objectId: 
+objectVal: "alice"
+   facets: 
+  
+  subject: "c.2"
+predicate: "name"
+ objectId: 
+objectVal: "charlie"
+   facets: 
+
+  subject: "c.1"
+predicate: "friend"
+ objectId: "c.2"
+objectVal:
+   facets: [
+        key: "close",
+        val: []byte{0x01},
+    valType: bool
+   ]
+```
+
 ### 2.2. map
+
+```json
+{
+    "friend": ["charlie", "bob", "josh"],
+    "friend|from": {
+        "0": "college",
+        "2": "work"
+    }
+}
+```
+
+```
+  subject: "c.1"
+predicate: "friend"
+ objectId: 
+objectVal: "charlie"
+   facets: [
+        key: "from",
+        val: []byte("college"),
+    valType: string
+   ]
+  
+  subject: "c.1"
+predicate: "friend"
+ objectId: 
+objectVal: "bob"
+   facets: 
+  
+  subject: "c.1"
+predicate: "friend"
+ objectId: 
+objectVal: "josh"
+   facets: [
+        key: "from",
+        val: []byte("work"),
+    valType: string
+   ]
+```
