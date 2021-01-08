@@ -44,6 +44,7 @@ func (t LevelType) String() string {
 type Level struct {
 	Type LevelType
 	Quad *Quad
+	Uids []string
 }
 
 type Levels struct {
@@ -61,10 +62,15 @@ func (l *Levels) String() string {
 }
 
 func (l *Levels) Add(t LevelType, q *Quad) {
-	l.Levels = append(l.Levels, &Level{t, q})
-}
-
-func (l *Levels) Uid(uid string) {
+	level := &Level{
+		Type: t,
+		Quad: q,
+		Uids: make([]string, 0),
+	}
+	if t == OBJECT && (q == nil || q.Subject == "") {
+		level.Uids = append(level.Uids, getNextUid())
+	}
+	l.Levels = append(l.Levels, level)
 }
 
 func (l *Levels) Pop() *Level {
@@ -151,12 +157,12 @@ func (p *Parser) Root() (ParserState, error) {
 	return nil, nil
 }
 
-func (p *Parser) Uid() (ParserState, error) {
+func (p *Parser) ObjectUid() (ParserState, error) {
 	n := p.Data.Tape[p.Next()]
 
 	switch byte(n >> 56) {
 	case '"':
-		p.Levels.Uid(p.String())
+		fmt.Println("found uid", p.String())
 		return p.LookForPredicate, nil
 	}
 
@@ -172,7 +178,7 @@ func (p *Parser) Object() (ParserState, error) {
 		p.Quad.Predicate = p.String()
 		if p.Quad.Predicate == "uid" {
 			p.Quad.Predicate = ""
-			return p.Uid, nil
+			return p.ObjectUid, nil
 		}
 		p.Quad.Subject = getNextUid()
 		return p.Value, nil
@@ -242,18 +248,16 @@ func (p *Parser) LookForPredicate() (ParserState, error) {
 		p.Levels.Add(OBJECT, p.Quad)
 		return p.Object, nil
 	case '}':
+		spew.Dump(p.Levels)
 		l := p.Levels.Pop()
-		fmt.Printf("closing object: %d %v\n", len(p.Levels.Levels), p.Levels.Top())
-		spew.Dump(l)
-		fmt.Println()
-		fmt.Println()
-		fmt.Println()
 		if a := p.Levels.Top(); a != nil && a.Type == ARRAY {
 			p.Quads = append(p.Quads, &Quad{
 				Subject:   a.Quad.Subject,
 				Predicate: a.Quad.Predicate,
 				ObjectId:  l.Quad.Subject,
 			})
+			// TODO:
+			//a.Uids = append(a.Uids, l.Quad.Subject)
 		}
 		return p.LookForPredicate, nil
 	case ']':
@@ -267,9 +271,10 @@ func (p *Parser) LookForPredicate() (ParserState, error) {
 	case '"':
 		p.Quad.Predicate = p.String()
 		if p.Quad.Subject == "" {
-			p.Quad.Subject = "xxxxxxx"
-		}
-		if p.Quad.Subject == "" {
+			fmt.Println("predicate")
+			spew.Dump(p.Levels)
+			fmt.Println()
+			fmt.Println()
 			p.Quad.Subject = getNextUid()
 		}
 		return p.Value, nil
