@@ -111,7 +111,9 @@ func (p *Parser) Array() (ParserState, error) {
 	case '{':
 		return p.Object, nil
 	case '[':
+		return p.Array, nil
 	case ']':
+		return nil, nil
 	case '"':
 	case 'l':
 	case 'u':
@@ -186,6 +188,12 @@ func (p *Parser) ObjectValue() (ParserState, error) {
 	c := p.Data.Tape[p.Next()]
 
 	switch byte(c >> 56) {
+	case '}':
+		if len(p.Objects) > 0 {
+			p.Quad.Subject = p.Objects[len(p.Objects)-1].Subject
+			p.Objects = p.Objects[:len(p.Objects)-1]
+		}
+		return p.Scan, nil
 	case '"':
 		p.Quad.Predicate = p.String()
 		if p.Quad.Predicate == "uid" {

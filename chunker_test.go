@@ -12,8 +12,9 @@ func Test(t *testing.T) {
 		"name": "karl",
 		"friend": {
 			"uid": "1000",
-			"name": "bob",
-			"age": "sixty",
+			"name": true,
+			"empty": {},
+			"age": 35.3,
 			"another_friend": {
 				"uid": "2000",
 				"name": "katrina",
