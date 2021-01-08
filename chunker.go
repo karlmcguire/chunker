@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"math"
 
+	"github.com/davecgh/go-spew/spew"
 	json "github.com/minio/simdjson-go"
 )
 
@@ -30,7 +31,7 @@ type Parser struct {
 	Quad      *Quad
 	Objects   []*Quad
 	Arrays    []*Quad
-	ArrayUids []string
+	ArrayUids [][]string
 
 	Quads []*Quad
 
@@ -42,7 +43,7 @@ func NewParser() *Parser {
 		Quad:      &Quad{},
 		Objects:   make([]*Quad, 0),
 		Arrays:    make([]*Quad, 0),
-		ArrayUids: make([]string, 0),
+		ArrayUids: make([][]string, 0),
 		Quads:     make([]*Quad, 0),
 	}
 }
@@ -59,7 +60,7 @@ func (p *Parser) Run(d []byte) error {
 	p.Quad = &Quad{}
 	p.Objects = make([]*Quad, 0)
 	p.Arrays = make([]*Quad, 0)
-	p.ArrayUids = make([]string, 0)
+	p.ArrayUids = make([][]string, 0)
 	for state := p.Root; state != nil; {
 		if state, err = state(); err != nil {
 			return err
@@ -107,7 +108,12 @@ func (p *Parser) Object() (ParserState, error) {
 		}
 		p.Quad.Subject = getNextUid()
 		if len(p.Arrays) > 0 {
-			p.ArrayUids = append(p.ArrayUids, p.Quad.Subject)
+			top := len(p.ArrayUids) - 1
+			if len(p.ArrayUids) == 0 {
+				p.ArrayUids = append(p.ArrayUids, make([]string, 0))
+				top = 0
+			}
+			p.ArrayUids[top] = append(p.ArrayUids[top], p.Quad.Subject)
 		}
 		return p.Value, nil
 	}
@@ -240,7 +246,12 @@ func (p *Parser) Uid() (ParserState, error) {
 	case '"':
 		p.Quad.Subject = p.String()
 		if len(p.Arrays) > 0 {
-			p.ArrayUids = append(p.ArrayUids, p.Quad.Subject)
+			top := len(p.ArrayUids) - 1
+			if len(p.ArrayUids) == 0 {
+				p.ArrayUids = append(p.ArrayUids, make([]string, 0))
+				top = 0
+			}
+			p.ArrayUids[top] = append(p.ArrayUids[top], []string{p.Quad.Subject}...)
 		}
 		if len(p.Objects) > 0 {
 			p.Objects[len(p.Objects)-1].ObjectId = p.Quad.Subject
@@ -269,14 +280,16 @@ func (p *Parser) Scan() (ParserState, error) {
 	case '[':
 	case ']':
 		if len(p.Arrays) > 0 {
+			uids := p.ArrayUids[len(p.ArrayUids)-1]
+			spew.Dump(uids)
 			p.Quad, p.Arrays = p.Arrays[len(p.Arrays)-1], p.Arrays[:len(p.Arrays)-1]
-			for len(p.ArrayUids) > 0 {
+			for len(uids) > 0 {
 				p.Quads = append(p.Quads, &Quad{
 					Subject:   p.Quad.Subject,
 					Predicate: p.Quad.Predicate,
-					ObjectId:  p.ArrayUids[len(p.ArrayUids)-1],
+					ObjectId:  uids[len(uids)-1],
 				})
-				p.ArrayUids = p.ArrayUids[:len(p.ArrayUids)-1]
+				uids = uids[:len(uids)-1]
 			}
 		}
 		return p.Scan, nil
