@@ -43,13 +43,23 @@ type Level struct {
 	Quad *Quad
 }
 
+type Levels struct {
+	Levels [][]*Level
+}
+
+func NewLevels() *Levels {
+	return &Levels{
+		Levels: make([][]*Level, 0),
+	}
+}
+
 type ParserState func() (ParserState, error)
 
 type Parser struct {
 	Data      *json.ParsedJson
 	Quad      *Quad
 	Quads     []*Quad
-	Levels    []*Level
+	Levels    *Levels
 	Pos       uint64
 	StringPos uint64
 }
@@ -58,7 +68,7 @@ func NewParser() *Parser {
 	return &Parser{
 		Quad:   &Quad{},
 		Quads:  make([]*Quad, 0),
-		Levels: make([]*Level, 0),
+		Levels: NewLevels(),
 	}
 }
 
@@ -211,6 +221,10 @@ func (p *Parser) LookForPredicate() (ParserState, error) {
 	n := p.Data.Tape[p.Next()]
 
 	switch byte(n >> 56) {
+	case '{':
+		p.Deeper(OBJECT, p.Quad)
+		p.Quad = &Quad{}
+		return p.Object, nil
 	case '}':
 		l := p.Pop()
 		if l != nil && l.Quad != nil && l.Quad.ObjectVal == nil {
