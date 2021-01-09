@@ -42,6 +42,20 @@ func NewDepth() *Depth {
 	}
 }
 
+func (d *Depth) Subject(i int) string {
+	if len(d.Levels) <= i {
+		return "xxxxxxxxxxxxx"
+	}
+	return d.Levels[len(d.Levels)-1-i].Uids[0]
+}
+
+func (d *Depth) Array() bool {
+	if len(d.Levels) == 0 {
+		return false
+	}
+	return d.Levels[len(d.Levels)-1].Type == ARRAY
+}
+
 func (d *Depth) SetUid(uid string) {
 	if len(d.Levels) == 0 {
 		return
@@ -104,6 +118,44 @@ func (t LevelType) String() string {
 ////////////////////////////////////////////////////////////////////////////////
 
 type (
+	Queue struct {
+		Quads []*Quad
+	}
+)
+
+func NewQueue() *Queue {
+	return &Queue{
+		Quads: make([]*Quad, 0),
+	}
+}
+
+func (q *Queue) Add(quad *Quad) {
+	q.Quads = append(q.Quads, quad)
+}
+
+func (q *Queue) Top() *Quad {
+	if len(q.Quads) == 0 {
+		return nil
+	}
+	return q.Quads[len(q.Quads)-1]
+}
+
+func (q *Queue) Pop() *Quad {
+	if len(q.Quads) == 0 {
+		return nil
+	}
+	quad := q.Quads[len(q.Quads)-1]
+	q.Quads = q.Quads[:len(q.Quads)-1]
+	return quad
+}
+
+func (q *Queue) String() string {
+	return ""
+}
+
+////////////////////////////////////////////////////////////////////////////////
+
+type (
 	ParserState func(byte) (ParserState, error)
 	Parser      struct {
 		Cursor       uint64
@@ -111,6 +163,7 @@ type (
 		Quad         *Quad
 		Quads        []*Quad
 		Depth        *Depth
+		Queue        *Queue
 		Parsed       *json.ParsedJson
 	}
 )
@@ -121,6 +174,7 @@ func NewParser() *Parser {
 		Quad:   &Quad{},
 		Quads:  make([]*Quad, 0),
 		Depth:  NewDepth(),
+		Queue:  NewQueue(),
 	}
 }
 
@@ -140,8 +194,8 @@ func (p *Parser) Run(d []byte) (err error) {
 func (p *Parser) Log(state ParserState) {
 	line := runtime.FuncForPC(reflect.ValueOf(state).Pointer()).Name()
 	name := strings.Split(line, ".")
-	fmt.Printf("-> %c - %s\n%v\n\n",
-		p.Parsed.Tape[p.Cursor]>>56, name[3][:len(name[3])-3], p.Depth)
+	fmt.Printf("-> %c - %s\n%v\n%s\n",
+		p.Parsed.Tape[p.Cursor]>>56, name[3][:len(name[3])-3], p.Depth, p.Queue)
 }
 
 func (p *Parser) String() string {
@@ -197,7 +251,15 @@ func (p *Parser) Predicate(n byte) (ParserState, error) {
 		p.Quad.Predicate = p.String()
 		return p.Value, nil
 	case '}':
-		p.Depth.Pop()
+		l := p.Depth.Pop()
+		q := p.Queue.Top()
+		if p.Depth.Array() && q != nil {
+			p.Quads = append(p.Quads, &Quad{
+				Subject:   p.Depth.Subject(1),
+				Predicate: q.Predicate,
+				ObjectId:  l.Uids[0],
+			})
+		}
 		return p.Predicate, nil
 	case '{':
 		p.Depth.Add(OBJECT)
@@ -219,9 +281,13 @@ func (p *Parser) Value(n byte) (ParserState, error) {
 	switch n {
 	case '{':
 		p.Depth.Add(OBJECT)
+		p.Queue.Add(p.Quad)
+		p.Quad = &Quad{}
 		return p.Object, nil
 	case '[':
 		p.Depth.Add(ARRAY)
+		p.Queue.Add(p.Quad)
+		p.Quad = &Quad{}
 		return p.Array, nil
 	case '"':
 		p.Quad.Subject = p.Depth.Uid()
