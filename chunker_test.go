@@ -13,11 +13,12 @@ func Test(t *testing.T) {
 		"friend": [
 			{
 				"uid": "1000",
-				"name": "sarah"
+				"sister": {
+					"name": "megan"
+				}
 			},
 			{
-				"uid": "2222",
-				"name": "megan"
+				"name": "charlie"
 			}
 		]
 	}`)); err != nil {
