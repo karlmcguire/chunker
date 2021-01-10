@@ -144,26 +144,6 @@ func (p *Parser) Root(n byte) (ParserState, error) {
 	return nil, nil
 }
 
-func (p *Parser) Scan(n byte) (ParserState, error) {
-	switch n {
-	case '{':
-		p.Deeper(OBJECT)
-		return p.Object, nil
-	case '}':
-	case '[':
-		p.Deeper(ARRAY)
-		return p.Array, nil
-	case ']':
-	case 'l':
-	case 'u':
-	case 'd':
-	case 't':
-	case 'f':
-	case 'n':
-	}
-	return nil, nil
-}
-
 func (p *Parser) Object(n byte) (ParserState, error) {
 	switch n {
 	case '{':
@@ -171,7 +151,7 @@ func (p *Parser) Object(n byte) (ParserState, error) {
 		return p.Object, nil
 	case '}':
 		l := p.Levels[len(p.Levels)-1]
-		if l.Wait != nil {
+		if l.Wait != nil && !l.Scalars {
 			p.Quad = l.Wait
 			p.Quad.ObjectId = l.Subject
 			p.Quads = append(p.Quads, p.Quad)
@@ -199,7 +179,7 @@ func (p *Parser) Object(n byte) (ParserState, error) {
 		p.Quad.Predicate = s
 		return p.Value, nil
 	}
-	return p.Scan, nil
+	return nil, nil
 }
 
 func (p *Parser) Array(n byte) (ParserState, error) {
@@ -211,13 +191,12 @@ func (p *Parser) Array(n byte) (ParserState, error) {
 		p.Deeper(OBJECT)
 		return p.Object, nil
 	case '}':
-		fmt.Println("ahhhhhhhhhh")
+		return p.Object, nil
 	case '[':
 		p.Deeper(ARRAY)
 		return p.Array, nil
 	case ']':
-		spew.Dump(p.Levels)
-		return nil, nil
+		return p.Object, nil
 	case '"':
 		l.Scalars = true
 		p.Quad.ObjectVal = p.String()
@@ -251,11 +230,19 @@ func (p *Parser) Array(n byte) (ParserState, error) {
 func (p *Parser) Value(n byte) (ParserState, error) {
 	switch n {
 	case '{':
+		if byte(p.Parsed.Tape[p.Cursor+1]>>56) == '}' {
+			p.Cursor++
+			return p.Object, nil
+		}
 		l := p.Deeper(OBJECT)
 		l.Wait = p.Quad
 		p.Quad = &Quad{}
 		return p.Object, nil
 	case '[':
+		if byte(p.Parsed.Tape[p.Cursor+1]>>56) == ']' {
+			p.Cursor++
+			return p.Object, nil
+		}
 		l := p.Deeper(ARRAY)
 		l.Wait = p.Quad
 		p.Quad = &Quad{}
