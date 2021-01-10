@@ -6,7 +6,6 @@ import (
 	"runtime"
 	"strings"
 
-	"github.com/davecgh/go-spew/spew"
 	json "github.com/minio/simdjson-go"
 )
 
@@ -73,6 +72,10 @@ func (d *Depth) SetUid(uid string) {
 
 func (d *Depth) Uid() string {
 	return d.Levels[len(d.Levels)-1].Uids[0]
+}
+
+func (d *Depth) UnderUid() string {
+	return d.Levels[len(d.Levels)-2].Uids[0]
 }
 
 func (d *Depth) Add(t LevelType) {
@@ -255,11 +258,6 @@ func (p *Parser) Predicate(n byte) (ParserState, error) {
 	case '}':
 		l := p.Depth.Pop()
 		q := p.Queue.Pop()
-		spew.Dump(l)
-		spew.Dump(q)
-		fmt.Println()
-		fmt.Println()
-		fmt.Println()
 		if q != nil {
 			if p.Depth.Array() {
 				p.Quads = append(p.Quads, &Quad{
@@ -288,6 +286,23 @@ func (p *Parser) Array(n byte) (ParserState, error) {
 	case '{':
 		p.Depth.Add(OBJECT)
 		return p.Object, nil
+	case ']':
+		p.Queue.Pop()
+		return p.Predicate, nil
+	case '"':
+		r := p.Queue.Top()
+		p.Quads = append(p.Quads, &Quad{
+			Subject:   p.Depth.UnderUid(),
+			Predicate: r.Predicate,
+			ObjectVal: p.String(),
+		})
+		return p.Array, nil
+	case 'l':
+	case 'u':
+	case 'd':
+	case 't':
+	case 'f':
+	case 'n':
 	}
 	return nil, nil
 }
