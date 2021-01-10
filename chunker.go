@@ -79,6 +79,9 @@ func (p *Parser) Run(d []byte) (err error) {
 		return
 	}
 	for state := p.Root; state != nil; p.Cursor++ {
+		if p.Cursor >= uint64(len(p.Parsed.Tape)) {
+			return
+		}
 		p.Log(state)
 		if state, err = state(byte(p.Parsed.Tape[p.Cursor] >> 56)); err != nil {
 			return
