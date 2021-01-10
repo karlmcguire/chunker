@@ -12,11 +12,24 @@ import (
 	json "github.com/minio/simdjson-go"
 )
 
+type Facet struct {
+	For string
+	Key string
+	Val interface{}
+}
+
 type Quad struct {
 	Subject   string
 	Predicate string
 	ObjectId  string
 	ObjectVal interface{}
+	Facets    []*Facet
+}
+
+func NewQuad() *Quad {
+	return &Quad{
+		Facets: make([]*Facet, 0),
+	}
 }
 
 var nextUid uint64 = 0
@@ -25,8 +38,6 @@ func getNextUid() string {
 	nextUid++
 	return fmt.Sprintf("c.%d", nextUid)
 }
-
-////////////////////////////////////////////////////////////////////////////////
 
 type (
 	LevelType uint8
@@ -59,6 +70,7 @@ type (
 		Cursor       uint64
 		StringCursor uint64
 		Quad         *Quad
+		Facet        *Facet
 		Quads        []*Quad
 		Levels       []*Level
 		Parsed       *json.ParsedJson
@@ -68,9 +80,10 @@ type (
 func NewParser() *Parser {
 	return &Parser{
 		Cursor: 1,
-		Quad:   &Quad{},
+		Quad:   NewQuad(),
 		Quads:  make([]*Quad, 0),
 		Levels: make([]*Level, 0),
+		Facet:  &Facet{},
 	}
 }
 
@@ -120,6 +133,7 @@ func (p *Parser) Deeper(t LevelType) *Level {
 
 func (p *Parser) Subject() string {
 	if len(p.Levels) == 0 {
+		// TODO:
 		return "eeeeeeeeee"
 	}
 	for i := len(p.Levels) - 1; i >= 0; i-- {
@@ -127,10 +141,9 @@ func (p *Parser) Subject() string {
 			return p.Levels[i].Subject
 		}
 	}
+	// TODO:
 	return "xxxxxxxxx"
 }
-
-////////////////////////////////////////////////////////////////////////////////
 
 func (p *Parser) Root(n byte) (ParserState, error) {
 	switch n {
@@ -155,7 +168,7 @@ func (p *Parser) Object(n byte) (ParserState, error) {
 			p.Quad = l.Wait
 			p.Quad.ObjectId = l.Subject
 			p.Quads = append(p.Quads, p.Quad)
-			p.Quad = &Quad{}
+			p.Quad = NewQuad()
 		} else {
 			if len(p.Levels) >= 2 {
 				a := p.Levels[len(p.Levels)-2]
@@ -163,8 +176,9 @@ func (p *Parser) Object(n byte) (ParserState, error) {
 					p.Quad.Subject = a.Wait.Subject
 					p.Quad.Predicate = a.Wait.Predicate
 					p.Quad.ObjectId = l.Subject
+					p.Quad.Facets = a.Wait.Facets
 					p.Quads = append(p.Quads, p.Quad)
-					p.Quad = &Quad{}
+					p.Quad = NewQuad()
 				}
 			}
 		}
@@ -175,11 +189,48 @@ func (p *Parser) Object(n byte) (ParserState, error) {
 		if s == "uid" {
 			return p.Uid, nil
 		}
-		p.Quad.Subject = p.Subject()
-		p.Quad.Predicate = s
-		return p.Value, nil
+		if strings.Contains(s, "|") {
+			e := strings.Split(s, "|")
+			if len(e) == 2 {
+				p.Facet.For = e[0]
+				p.Facet.Key = e[1]
+				return p.ScalarFacet, nil
+			}
+		} else {
+			p.Quad.Subject = p.Subject()
+			p.Quad.Predicate = s
+			return p.Value, nil
+		}
+		return p.Object, nil
 	}
 	return nil, nil
+}
+
+func (p *Parser) ScalarFacet(n byte) (ParserState, error) {
+	switch n {
+	case '"':
+		p.Facet.Val = p.String()
+	case 't':
+		p.Facet.Val = true
+	}
+	fmt.Println("---------------------------")
+	spew.Dump(p.Levels)
+	fmt.Println("---------------------------")
+	for i := len(p.Levels) - 1; i >= 0; i-- {
+		if p.Levels[i].Wait != nil && p.Levels[i].Wait.Predicate == p.Facet.For {
+			p.Levels[i].Wait.Facets = append(p.Levels[i].Wait.Facets, p.Facet)
+			p.Facet = &Facet{}
+			return p.Object, nil
+		}
+	}
+	for i := len(p.Quads) - 1; i >= 0; i-- {
+		if p.Quads[i].Predicate == p.Facet.For {
+			p.Quads[i].Facets = append(p.Quads[i].Facets, p.Facet)
+			p.Facet = &Facet{}
+			return p.Object, nil
+		}
+	}
+	return p.Object, nil
 }
 
 func (p *Parser) Array(n byte) (ParserState, error) {
@@ -223,7 +274,7 @@ func (p *Parser) Array(n byte) (ParserState, error) {
 		p.Quad.ObjectVal = nil
 	}
 	p.Quads = append(p.Quads, p.Quad)
-	p.Quad = &Quad{}
+	p.Quad = NewQuad()
 	return p.Array, nil
 }
 
@@ -236,7 +287,7 @@ func (p *Parser) Value(n byte) (ParserState, error) {
 		}
 		l := p.Deeper(OBJECT)
 		l.Wait = p.Quad
-		p.Quad = &Quad{}
+		p.Quad = NewQuad()
 		return p.Object, nil
 	case '[':
 		if byte(p.Parsed.Tape[p.Cursor+1]>>56) == ']' {
@@ -245,7 +296,7 @@ func (p *Parser) Value(n byte) (ParserState, error) {
 		}
 		l := p.Deeper(ARRAY)
 		l.Wait = p.Quad
-		p.Quad = &Quad{}
+		p.Quad = NewQuad()
 		return p.Array, nil
 	case '"':
 		p.Quad.ObjectVal = p.String()
@@ -266,7 +317,7 @@ func (p *Parser) Value(n byte) (ParserState, error) {
 		p.Quad.ObjectVal = nil
 	}
 	p.Quads = append(p.Quads, p.Quad)
-	p.Quad = &Quad{}
+	p.Quad = NewQuad()
 	return p.Object, nil
 }
 
