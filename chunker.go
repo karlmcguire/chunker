@@ -133,7 +133,7 @@ func (p *Parser) Root(n byte) (ParserState, error) {
 	switch n {
 	case '{':
 		p.Deeper(OBJECT)
-		return p.Object(p.Root), nil
+		return p.Object, nil
 	case '[':
 		p.Deeper(ARRAY)
 		return p.Array, nil
@@ -141,40 +141,62 @@ func (p *Parser) Root(n byte) (ParserState, error) {
 	return nil, nil
 }
 
-func (p *Parser) Uid(f ParserState) ParserState {
-	return func(n byte) (ParserState, error) {
-		if n != '"' {
-			return nil, errors.New("expected uid, instead found: " + p.String())
-		}
-		p.Levels[len(p.Levels)-1].Subject = p.String()
-		return f, nil
+func (p *Parser) Scan(n byte) (ParserState, error) {
+	switch n {
+	case '{':
+		p.Deeper(OBJECT)
+		return p.Object, nil
+	case '}':
+	case '[':
+		p.Deeper(ARRAY)
+		return p.Array, nil
+	case ']':
+	case 'l':
+	case 'u':
+	case 'd':
+	case 't':
+	case 'f':
+	case 'n':
 	}
+	return nil, nil
 }
 
-func (p *Parser) Object(f ParserState) ParserState {
-	return func(n byte) (ParserState, error) {
-		switch n {
-		case '"':
-			s := p.String()
-			if s == "uid" {
-				return p.Uid(p.Object(f)), nil
+func (p *Parser) Object(n byte) (ParserState, error) {
+	switch n {
+	case '{':
+		p.Deeper(OBJECT)
+		return p.Object, nil
+	case '}':
+		l := p.Levels[len(p.Levels)-1]
+		if l.Wait != nil {
+			p.Quad = l.Wait
+			p.Quad.ObjectId = l.Subject
+			p.Quads = append(p.Quads, p.Quad)
+			p.Quad = &Quad{}
+		} else {
+			if len(p.Levels) >= 2 {
+				a := p.Levels[len(p.Levels)-2]
+				if a.Type == ARRAY && a.Wait != nil {
+					p.Quad.Subject = a.Wait.Subject
+					p.Quad.Predicate = a.Wait.Predicate
+					p.Quad.ObjectId = l.Subject
+					p.Quads = append(p.Quads, p.Quad)
+					p.Quad = &Quad{}
+				}
 			}
-			p.Quad.Subject = p.Subject()
-			p.Quad.Predicate = s
-			return p.Value(p.Object(f)), nil
-		case '}':
-			l := p.Levels[len(p.Levels)-1]
-			if l.Wait != nil {
-				p.Quad = l.Wait
-				p.Quad.ObjectId = l.Subject
-				p.Quads = append(p.Quads, p.Quad)
-				p.Quad = &Quad{}
-			}
-			p.Levels = p.Levels[:len(p.Levels)-1]
-			return p.Object(f), nil
 		}
-		return nil, nil
+		p.Levels = p.Levels[:len(p.Levels)-1]
+		return p.Object, nil
+	case '"':
+		s := p.String()
+		if s == "uid" {
+			return p.Uid, nil
+		}
+		p.Quad.Subject = p.Subject()
+		p.Quad.Predicate = s
+		return p.Value, nil
 	}
+	return p.Scan, nil
 }
 
 func (p *Parser) Array(n byte) (ParserState, error) {
@@ -184,10 +206,12 @@ func (p *Parser) Array(n byte) (ParserState, error) {
 	switch n {
 	case '{':
 		p.Deeper(OBJECT)
-		return p.Object(p.Array), nil
+		return p.Object, nil
 	case '}':
 		fmt.Println("ahhhhhhhhhh")
 	case '[':
+		p.Deeper(ARRAY)
+		return p.Array, nil
 	case ']':
 		spew.Dump(p.Levels)
 		return nil, nil
@@ -221,39 +245,45 @@ func (p *Parser) Array(n byte) (ParserState, error) {
 	return p.Array, nil
 }
 
-func (p *Parser) Value(f ParserState) ParserState {
-	return func(n byte) (ParserState, error) {
-		switch n {
-		case '{':
-			l := p.Deeper(OBJECT)
-			l.Wait = p.Quad
-			p.Quad = &Quad{}
-			return p.Object(f), nil
-		case '[':
-			l := p.Deeper(ARRAY)
-			l.Wait = p.Quad
-			p.Quad = &Quad{}
-			return p.Array, nil
-		case '"':
-			p.Quad.ObjectVal = p.String()
-		case 'l':
-			p.Cursor++
-			p.Quad.ObjectVal = int64(p.Parsed.Tape[p.Cursor])
-		case 'u':
-			p.Cursor++
-			p.Quad.ObjectVal = p.Parsed.Tape[p.Cursor]
-		case 'd':
-			p.Cursor++
-			p.Quad.ObjectVal = math.Float64frombits(p.Parsed.Tape[p.Cursor])
-		case 't':
-			p.Quad.ObjectVal = true
-		case 'f':
-			p.Quad.ObjectVal = false
-		case 'n':
-			p.Quad.ObjectVal = nil
-		}
-		p.Quads = append(p.Quads, p.Quad)
+func (p *Parser) Value(n byte) (ParserState, error) {
+	switch n {
+	case '{':
+		l := p.Deeper(OBJECT)
+		l.Wait = p.Quad
 		p.Quad = &Quad{}
-		return f, nil
+		return p.Object, nil
+	case '[':
+		l := p.Deeper(ARRAY)
+		l.Wait = p.Quad
+		p.Quad = &Quad{}
+		return p.Array, nil
+	case '"':
+		p.Quad.ObjectVal = p.String()
+	case 'l':
+		p.Cursor++
+		p.Quad.ObjectVal = int64(p.Parsed.Tape[p.Cursor])
+	case 'u':
+		p.Cursor++
+		p.Quad.ObjectVal = p.Parsed.Tape[p.Cursor]
+	case 'd':
+		p.Cursor++
+		p.Quad.ObjectVal = math.Float64frombits(p.Parsed.Tape[p.Cursor])
+	case 't':
+		p.Quad.ObjectVal = true
+	case 'f':
+		p.Quad.ObjectVal = false
+	case 'n':
+		p.Quad.ObjectVal = nil
 	}
+	p.Quads = append(p.Quads, p.Quad)
+	p.Quad = &Quad{}
+	return p.Object, nil
+}
+
+func (p *Parser) Uid(n byte) (ParserState, error) {
+	if n != '"' {
+		return nil, errors.New("expected uid, instead found: " + p.String())
+	}
+	p.Levels[len(p.Levels)-1].Subject = p.String()
+	return p.Object, nil
 }
