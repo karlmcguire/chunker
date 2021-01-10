@@ -1,7 +1,9 @@
 package chunker
 
 import (
+	"errors"
 	"fmt"
+	"math"
 	"reflect"
 	"runtime"
 	"strings"
@@ -32,6 +34,7 @@ type (
 		Type    LevelType
 		Subject string
 		Wait    *Quad
+		Scalars bool
 	}
 )
 
@@ -87,7 +90,7 @@ func (p *Parser) Run(d []byte) (err error) {
 func (p *Parser) Log(state ParserState) {
 	line := runtime.FuncForPC(reflect.ValueOf(state).Pointer()).Name()
 	name := strings.Split(strings.Split(line, ".")[3], "-")
-	fmt.Printf("-> %c - %s\n%v\n",
+	fmt.Printf("-> %c - %v\n%v\n",
 		p.Parsed.Tape[p.Cursor]>>56, name[0], spew.Sdump(p.Levels))
 }
 
@@ -99,15 +102,17 @@ func (p *Parser) String() string {
 	return string(s)
 }
 
-func (p *Parser) Deeper(t LevelType) {
+func (p *Parser) Deeper(t LevelType) *Level {
 	var subject string
 	if t == OBJECT {
 		subject = getNextUid()
 	}
-	p.Levels = append(p.Levels, &Level{
+	level := &Level{
 		Type:    t,
 		Subject: subject,
-	})
+	}
+	p.Levels = append(p.Levels, level)
+	return level
 }
 
 func (p *Parser) Subject() string {
@@ -122,105 +127,133 @@ func (p *Parser) Subject() string {
 	return "xxxxxxxxx"
 }
 
-func (p *Parser) FoundSubject(s string) {
-	p.Levels[len(p.Levels)-1].Subject = s
-}
-
 ////////////////////////////////////////////////////////////////////////////////
 
 func (p *Parser) Root(n byte) (ParserState, error) {
 	switch n {
 	case '{':
-		return p.Object, nil
+		p.Deeper(OBJECT)
+		return p.Object(p.Root), nil
 	case '[':
+		p.Deeper(ARRAY)
 		return p.Array, nil
 	}
 	return nil, nil
 }
 
-func (p *Parser) Object(n byte) (ParserState, error) {
-	p.Deeper(OBJECT)
-	switch n {
-	case '"':
-		p.Quad.Subject = p.Subject()
-		p.Quad.Predicate = p.String()
-		return p.Value, nil
+func (p *Parser) Uid(f ParserState) ParserState {
+	return func(n byte) (ParserState, error) {
+		if n != '"' {
+			return nil, errors.New("expected uid, instead found: " + p.String())
+		}
+		p.Levels[len(p.Levels)-1].Subject = p.String()
+		return f, nil
 	}
-	return nil, nil
 }
 
-func (p *Parser) ObjectValue(n byte) (ParserState, error) {
-	return nil, nil
+func (p *Parser) Object(f ParserState) ParserState {
+	return func(n byte) (ParserState, error) {
+		switch n {
+		case '"':
+			s := p.String()
+			if s == "uid" {
+				return p.Uid(p.Object(f)), nil
+			}
+			p.Quad.Subject = p.Subject()
+			p.Quad.Predicate = s
+			return p.Value(p.Object(f)), nil
+		case '}':
+			l := p.Levels[len(p.Levels)-1]
+			if l.Wait != nil {
+				p.Quad = l.Wait
+				p.Quad.ObjectId = l.Subject
+				p.Quads = append(p.Quads, p.Quad)
+				p.Quad = &Quad{}
+			}
+			p.Levels = p.Levels[:len(p.Levels)-1]
+			return p.Object(f), nil
+		}
+		return nil, nil
+	}
 }
 
 func (p *Parser) Array(n byte) (ParserState, error) {
-	p.Deeper(ARRAY)
-	return nil, nil
-}
-
-func (p *Parser) ArrayScalar(n byte) (ParserState, error) {
-	return nil, nil
-}
-
-func (p *Parser) ArrayObject(n byte) (ParserState, error) {
-	p.Deeper(OBJECT)
-	switch n {
-	case '"':
-		s := p.String()
-		if s == "uid" {
-			return p.Uid(p.ArrayObject), nil
-		}
-		spew.Dump(p.Levels)
-		fmt.Println(s, len(p.Levels), p.Subject())
-	}
-	return nil, nil
-}
-
-func (p *Parser) ArrayValue(n byte) (ParserState, error) {
+	l := p.Levels[len(p.Levels)-1]
+	p.Quad.Subject = l.Wait.Subject
+	p.Quad.Predicate = l.Wait.Predicate
 	switch n {
 	case '{':
-		return p.ArrayObject, nil
+		p.Deeper(OBJECT)
+		return p.Object(p.Array), nil
+	case '}':
+		fmt.Println("ahhhhhhhhhh")
+	case '[':
+	case ']':
+		spew.Dump(p.Levels)
+		return nil, nil
 	case '"':
-		p.Quad.Subject = p.Subject()
-		p.Quad.Predicate = p.Levels[len(p.Levels)-1].Wait.Predicate
+		l.Scalars = true
 		p.Quad.ObjectVal = p.String()
+	case 'l':
+		l.Scalars = true
+		p.Cursor++
+		p.Quad.ObjectVal = int64(p.Parsed.Tape[p.Cursor])
+	case 'u':
+		l.Scalars = true
+		p.Cursor++
+		p.Quad.ObjectVal = p.Parsed.Tape[p.Cursor]
+	case 'd':
+		l.Scalars = true
+		p.Cursor++
+		p.Quad.ObjectVal = math.Float64frombits(p.Parsed.Tape[p.Cursor])
+	case 't':
+		l.Scalars = true
+		p.Quad.ObjectVal = true
+	case 'f':
+		l.Scalars = true
+		p.Quad.ObjectVal = false
+	case 'n':
+		l.Scalars = true
+		p.Quad.ObjectVal = nil
+	}
+	p.Quads = append(p.Quads, p.Quad)
+	p.Quad = &Quad{}
+	return p.Array, nil
+}
+
+func (p *Parser) Value(f ParserState) ParserState {
+	return func(n byte) (ParserState, error) {
+		switch n {
+		case '{':
+			l := p.Deeper(OBJECT)
+			l.Wait = p.Quad
+			p.Quad = &Quad{}
+			return p.Object(f), nil
+		case '[':
+			l := p.Deeper(ARRAY)
+			l.Wait = p.Quad
+			p.Quad = &Quad{}
+			return p.Array, nil
+		case '"':
+			p.Quad.ObjectVal = p.String()
+		case 'l':
+			p.Cursor++
+			p.Quad.ObjectVal = int64(p.Parsed.Tape[p.Cursor])
+		case 'u':
+			p.Cursor++
+			p.Quad.ObjectVal = p.Parsed.Tape[p.Cursor]
+		case 'd':
+			p.Cursor++
+			p.Quad.ObjectVal = math.Float64frombits(p.Parsed.Tape[p.Cursor])
+		case 't':
+			p.Quad.ObjectVal = true
+		case 'f':
+			p.Quad.ObjectVal = false
+		case 'n':
+			p.Quad.ObjectVal = nil
+		}
 		p.Quads = append(p.Quads, p.Quad)
 		p.Quad = &Quad{}
-		return p.ArrayValue, nil
-	case ']':
-		return p.Scan, nil
-	}
-	return nil, nil
-}
-
-func (p *Parser) Value(n byte) (ParserState, error) {
-	switch n {
-	case '{':
-		p.Levels[len(p.Levels)-1].Wait = p.Quad
-		p.Quad = &Quad{}
-		return p.ObjectValue, nil
-	case '[':
-		p.Levels[len(p.Levels)-1].Wait = p.Quad
-		p.Quad = &Quad{}
-		return p.ArrayValue, nil
-	case '"':
-	case 'l':
-	case 'u':
-	case 'd':
-	case 't':
-	case 'f':
-	case 'n':
-	}
-	return nil, nil
-}
-
-func (p *Parser) Scan(n byte) (ParserState, error) {
-	return nil, nil
-}
-
-func (p *Parser) Uid(f ParserState) ParserState {
-	return func(n byte) (ParserState, error) {
-		p.FoundSubject(p.String())
 		return f, nil
 	}
 }

@@ -11,7 +11,6 @@ func Test(t *testing.T) {
 	if err := p.Run([]byte(`{
 		"friend": [
 			{
-				"uid": "10000",
 				"name": "karl"
 			},
 			{
