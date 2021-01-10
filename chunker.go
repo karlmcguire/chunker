@@ -6,6 +6,7 @@ import (
 	"runtime"
 	"strings"
 
+	"github.com/davecgh/go-spew/spew"
 	json "github.com/minio/simdjson-go"
 )
 
@@ -28,82 +29,11 @@ func getNextUid() string {
 type (
 	LevelType uint8
 	Level     struct {
-		Type LevelType
-		Uids []string
-	}
-	Depth struct {
-		Levels []*Level
+		Type    LevelType
+		Subject string
+		Wait    *Quad
 	}
 )
-
-func NewDepth() *Depth {
-	return &Depth{
-		Levels: make([]*Level, 0),
-	}
-}
-
-func (d *Depth) Subject(i int) string {
-	if len(d.Levels) <= i {
-		return "xxxxxxxxxxxxx"
-	}
-	return d.Levels[len(d.Levels)-1-i].Uids[0]
-}
-
-func (d *Depth) Array() bool {
-	if len(d.Levels) == 0 {
-		return false
-	}
-	return d.Levels[len(d.Levels)-1].Type == ARRAY
-}
-
-func (d *Depth) SetUid(uid string) {
-	if len(d.Levels) == 0 {
-		return
-	}
-	nextUid--
-	d.Levels[len(d.Levels)-1].Uids[0] = uid
-	if len(d.Levels) > 1 {
-		under := d.Levels[len(d.Levels)-2]
-		if under.Type == ARRAY {
-			under.Uids = append(under.Uids, uid)
-		}
-	}
-}
-
-func (d *Depth) Uid() string {
-	return d.Levels[len(d.Levels)-1].Uids[0]
-}
-
-func (d *Depth) UnderUid() string {
-	return d.Levels[len(d.Levels)-2].Uids[0]
-}
-
-func (d *Depth) Add(t LevelType) {
-	uids := []string{""}
-	if t == OBJECT {
-		uids[0] = getNextUid()
-	}
-	d.Levels = append(d.Levels, &Level{
-		Type: t,
-		Uids: uids,
-	})
-}
-
-func (d *Depth) Pop() *Level {
-	level := d.Levels[len(d.Levels)-1]
-	if len(d.Levels) > 1 {
-		d.Levels = d.Levels[:len(d.Levels)-1]
-	}
-	return level
-}
-
-func (d *Depth) String() string {
-	o := ""
-	for _, level := range d.Levels {
-		o += level.Type.String() + fmt.Sprintf("(%v) ", level.Uids)
-	}
-	return o
-}
 
 const (
 	OBJECT LevelType = iota
@@ -120,46 +50,6 @@ func (t LevelType) String() string {
 	return "?"
 }
 
-////////////////////////////////////////////////////////////////////////////////
-
-type (
-	Queue struct {
-		Quads []*Quad
-	}
-)
-
-func NewQueue() *Queue {
-	return &Queue{
-		Quads: make([]*Quad, 0),
-	}
-}
-
-func (q *Queue) Add(quad *Quad) {
-	q.Quads = append(q.Quads, quad)
-}
-
-func (q *Queue) Top() *Quad {
-	if len(q.Quads) == 0 {
-		return nil
-	}
-	return q.Quads[len(q.Quads)-1]
-}
-
-func (q *Queue) Pop() *Quad {
-	if len(q.Quads) == 0 {
-		return nil
-	}
-	quad := q.Quads[len(q.Quads)-1]
-	q.Quads = q.Quads[:len(q.Quads)-1]
-	return quad
-}
-
-func (q *Queue) String() string {
-	return ""
-}
-
-////////////////////////////////////////////////////////////////////////////////
-
 type (
 	ParserState func(byte) (ParserState, error)
 	Parser      struct {
@@ -167,8 +57,7 @@ type (
 		StringCursor uint64
 		Quad         *Quad
 		Quads        []*Quad
-		Depth        *Depth
-		Queue        *Queue
+		Levels       []*Level
 		Parsed       *json.ParsedJson
 	}
 )
@@ -178,8 +67,7 @@ func NewParser() *Parser {
 		Cursor: 1,
 		Quad:   &Quad{},
 		Quads:  make([]*Quad, 0),
-		Depth:  NewDepth(),
-		Queue:  NewQueue(),
+		Levels: make([]*Level, 0),
 	}
 }
 
@@ -198,9 +86,9 @@ func (p *Parser) Run(d []byte) (err error) {
 
 func (p *Parser) Log(state ParserState) {
 	line := runtime.FuncForPC(reflect.ValueOf(state).Pointer()).Name()
-	name := strings.Split(line, ".")
-	fmt.Printf("-> %c - %s\n%v\n%s\n",
-		p.Parsed.Tape[p.Cursor]>>56, name[3][:len(name[3])-3], p.Depth, p.Queue)
+	name := strings.Split(strings.Split(line, ".")[3], "-")
+	fmt.Printf("-> %c - %s\n%v\n",
+		p.Parsed.Tape[p.Cursor]>>56, name[0], spew.Sdump(p.Levels))
 }
 
 func (p *Parser) String() string {
@@ -211,92 +99,111 @@ func (p *Parser) String() string {
 	return string(s)
 }
 
+func (p *Parser) Deeper(t LevelType) {
+	var subject string
+	if t == OBJECT {
+		subject = getNextUid()
+	}
+	p.Levels = append(p.Levels, &Level{
+		Type:    t,
+		Subject: subject,
+	})
+}
+
+func (p *Parser) Subject() string {
+	if len(p.Levels) == 0 {
+		return "eeeeeeeeee"
+	}
+	for i := len(p.Levels) - 1; i >= 0; i-- {
+		if p.Levels[i].Type == OBJECT {
+			return p.Levels[i].Subject
+		}
+	}
+	return "xxxxxxxxx"
+}
+
+func (p *Parser) FoundSubject(s string) {
+	p.Levels[len(p.Levels)-1].Subject = s
+}
+
 ////////////////////////////////////////////////////////////////////////////////
 
 func (p *Parser) Root(n byte) (ParserState, error) {
 	switch n {
 	case '{':
-		p.Depth.Add(OBJECT)
 		return p.Object, nil
 	case '[':
-		p.Depth.Add(ARRAY)
 		return p.Array, nil
-	}
-	return nil, nil
-}
-
-func (p *Parser) Uid(n byte) (ParserState, error) {
-	switch n {
-	case '"':
-		p.Depth.SetUid(p.String())
-		return p.Predicate, nil
 	}
 	return nil, nil
 }
 
 func (p *Parser) Object(n byte) (ParserState, error) {
+	p.Deeper(OBJECT)
 	switch n {
 	case '"':
-		s := p.String()
-		if s == "uid" {
-			return p.Uid, nil
-		}
-		p.Quad.Predicate = s
+		p.Quad.Subject = p.Subject()
+		p.Quad.Predicate = p.String()
 		return p.Value, nil
-	case '}':
-		p.Depth.Pop()
-		return p.Predicate, nil
 	}
 	return nil, nil
 }
 
-func (p *Parser) Predicate(n byte) (ParserState, error) {
-	switch n {
-	case '"':
-		p.Quad.Predicate = p.String()
-		return p.Value, nil
-	case '}':
-		l := p.Depth.Pop()
-		q := p.Queue.Pop()
-		if q != nil {
-			if p.Depth.Array() {
-				p.Quads = append(p.Quads, &Quad{
-					Subject:   p.Depth.Subject(1),
-					Predicate: q.Predicate,
-					ObjectId:  l.Uids[0],
-				})
-			} else {
-				p.Quads = append(p.Quads, &Quad{
-					Subject:   p.Depth.Subject(0),
-					Predicate: q.Predicate,
-					ObjectId:  l.Uids[0],
-				})
-			}
-		}
-		return p.Predicate, nil
-	case '{':
-		p.Depth.Add(OBJECT)
-		return p.Object, nil
-	}
+func (p *Parser) ObjectValue(n byte) (ParserState, error) {
 	return nil, nil
 }
 
 func (p *Parser) Array(n byte) (ParserState, error) {
+	p.Deeper(ARRAY)
+	return nil, nil
+}
+
+func (p *Parser) ArrayScalar(n byte) (ParserState, error) {
+	return nil, nil
+}
+
+func (p *Parser) ArrayObject(n byte) (ParserState, error) {
+	p.Deeper(OBJECT)
+	switch n {
+	case '"':
+		s := p.String()
+		if s == "uid" {
+			return p.Uid(p.ArrayObject), nil
+		}
+		spew.Dump(p.Levels)
+		fmt.Println(s, len(p.Levels), p.Subject())
+	}
+	return nil, nil
+}
+
+func (p *Parser) ArrayValue(n byte) (ParserState, error) {
 	switch n {
 	case '{':
-		p.Depth.Add(OBJECT)
-		return p.Object, nil
-	case ']':
-		p.Queue.Pop()
-		return p.Predicate, nil
+		return p.ArrayObject, nil
 	case '"':
-		r := p.Queue.Top()
-		p.Quads = append(p.Quads, &Quad{
-			Subject:   p.Depth.UnderUid(),
-			Predicate: r.Predicate,
-			ObjectVal: p.String(),
-		})
-		return p.Array, nil
+		p.Quad.Subject = p.Subject()
+		p.Quad.Predicate = p.Levels[len(p.Levels)-1].Wait.Predicate
+		p.Quad.ObjectVal = p.String()
+		p.Quads = append(p.Quads, p.Quad)
+		p.Quad = &Quad{}
+		return p.ArrayValue, nil
+	case ']':
+		return p.Scan, nil
+	}
+	return nil, nil
+}
+
+func (p *Parser) Value(n byte) (ParserState, error) {
+	switch n {
+	case '{':
+		p.Levels[len(p.Levels)-1].Wait = p.Quad
+		p.Quad = &Quad{}
+		return p.ObjectValue, nil
+	case '[':
+		p.Levels[len(p.Levels)-1].Wait = p.Quad
+		p.Quad = &Quad{}
+		return p.ArrayValue, nil
+	case '"':
 	case 'l':
 	case 'u':
 	case 'd':
@@ -307,24 +214,13 @@ func (p *Parser) Array(n byte) (ParserState, error) {
 	return nil, nil
 }
 
-func (p *Parser) Value(n byte) (ParserState, error) {
-	switch n {
-	case '{':
-		p.Depth.Add(OBJECT)
-		p.Queue.Add(p.Quad)
-		p.Quad = &Quad{}
-		return p.Object, nil
-	case '[':
-		p.Depth.Add(ARRAY)
-		p.Queue.Add(p.Quad)
-		p.Quad = &Quad{}
-		return p.Array, nil
-	case '"':
-		p.Quad.Subject = p.Depth.Uid()
-		p.Quad.ObjectVal = p.String()
-		p.Quads = append(p.Quads, p.Quad)
-		p.Quad = &Quad{}
-		return p.Predicate, nil
-	}
+func (p *Parser) Scan(n byte) (ParserState, error) {
 	return nil, nil
+}
+
+func (p *Parser) Uid(f ParserState) ParserState {
+	return func(n byte) (ParserState, error) {
+		p.FoundSubject(p.String())
+		return f, nil
+	}
 }

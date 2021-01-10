@@ -10,13 +10,14 @@ func Test(t *testing.T) {
 	p := NewParser()
 	if err := p.Run([]byte(`{
 		"friend": [
-		{
-			"uid": "1000",
-			"name": "karl"
-		},
-		{
-			"name": "megan"
-		}]	
+			{
+				"uid": "10000",
+				"name": "karl"
+			},
+			{
+				"name": "megan"
+			}
+		]
 	}`)); err != nil {
 		t.Fatal(err)
 	}
