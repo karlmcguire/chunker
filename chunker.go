@@ -167,6 +167,11 @@ func (p *Parser) Object(n byte) (ParserState, error) {
 	case '}':
 		l := p.Levels[len(p.Levels)-1]
 		if l.Wait != nil && !l.Scalars {
+			fmt.Println()
+			fmt.Println()
+			fmt.Println("ADDDDDDDDDDDDDDDDDING: ", l.Wait)
+			fmt.Println()
+			fmt.Println()
 			p.Quad = l.Wait
 			p.Quad.ObjectId = l.Subject
 			p.Quads = append(p.Quads, p.Quad)
@@ -224,6 +229,9 @@ func (p *Parser) MapFacet(n byte) (ParserState, error) {
 		}
 		p.Facet.Id = id
 		return p.MapFacetVal, nil
+	case '}':
+		// TODO: document why this is important
+		p.Facet = &Facet{}
 	}
 	return p.Object, nil
 }
@@ -233,31 +241,42 @@ func (p *Parser) MapFacetVal(n byte) (ParserState, error) {
 	case '"':
 		p.Facet.Val = p.String()
 	case 'l':
+		p.Cursor++
+		p.Facet.Val = int64(p.Parsed.Tape[p.Cursor])
 	case 'u':
+		p.Cursor++
+		p.Facet.Val = p.Parsed.Tape[p.Cursor]
 	case 'd':
+		p.Cursor++
+		p.Facet.Val = math.Float64frombits(p.Parsed.Tape[p.Cursor])
 	case 't':
+		p.Facet.Val = true
 	case 'f':
+		p.Facet.Val = false
 	case 'n':
+		p.Facet.Val = nil
 	}
-	c := 0
+	quads := make([]*Quad, 0)
 	for i := len(p.Quads) - 1; i >= 0; i-- {
-		fmt.Println("------------", c, p.Facet.Id, len(p.Quads)-1, p.Facet)
 		if p.Quads[i].Predicate == p.Facet.For {
-			if c == len(p.Quads)-1-p.Facet.Id {
-				p.Quads[i].Facets = append(p.Quads[i].Facets, p.Facet)
-				facetFor, facetKey := p.Facet.For, p.Facet.Key
-				p.Facet = &Facet{
-					For: facetFor,
-					Key: facetKey,
-				}
-				return p.MapFacet, nil
-			}
-			c++
+			quads = append(quads, p.Quads[i])
 		} else {
 			break
 		}
 	}
-	fmt.Println()
+
+	for i := len(quads) - 1; i >= 0; i-- {
+		if i == len(quads)-1-p.Facet.Id {
+			quads[i].Facets = append(quads[i].Facets, p.Facet)
+			// make new facet
+			facetFor, facetKey := p.Facet.For, p.Facet.Key
+			p.Facet = &Facet{
+				For: facetFor,
+				Key: facetKey,
+			}
+			return p.MapFacet, nil
+		}
+	}
 	return p.MapFacet, nil
 }
 
