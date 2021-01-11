@@ -188,6 +188,7 @@ func (p *Parser) Object(n byte) (ParserState, error) {
 		p.Levels = p.Levels[:len(p.Levels)-1]
 		return p.Object, nil
 	case ']':
+		p.Levels = p.Levels[:len(p.Levels)-1]
 		return p.Object, nil
 	case '"':
 		s := p.String()
