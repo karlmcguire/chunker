@@ -25,57 +25,30 @@ type Quad struct {
 }
 
 func NewQuad() *Quad {
-	return &Quad{
-		Facets: make([]*api.Facet, 0),
-	}
+	return &Quad{Facets: make([]*api.Facet, 0)}
 }
 
-var nextUid uint64 = 0
-
-func getNextUid() string {
-	nextUid++
-	return fmt.Sprintf("c.%d", nextUid)
+type Level struct {
+	Array   bool
+	Subject string
+	Wait    *Quad
+	Scalars bool
 }
 
-type (
-	LevelType uint8
-	Level     struct {
-		Type    LevelType
-		Subject string
-		Wait    *Quad
-		Scalars bool
-	}
-)
+type ParserState func(byte) (ParserState, error)
 
-const (
-	OBJECT LevelType = iota
-	ARRAY
-)
-
-func (t LevelType) String() string {
-	switch t {
-	case OBJECT:
-		return "OBJECT"
-	case ARRAY:
-		return "ARRAY"
-	}
-	return "?"
+type Parser struct {
+	Cursor         uint64
+	StringCursor   uint64
+	SubjectCounter uint64
+	Quad           *Quad
+	Facet          *api.Facet
+	Quads          []*Quad
+	Levels         []*Level
+	Parsed         *json.ParsedJson
+	FacetPred      string
+	FacetId        int
 }
-
-type (
-	ParserState func(byte) (ParserState, error)
-	Parser      struct {
-		Cursor       uint64
-		StringCursor uint64
-		Quad         *Quad
-		Facet        *api.Facet
-		Quads        []*Quad
-		Levels       []*Level
-		Parsed       *json.ParsedJson
-		FacetPred    string
-		FacetId      int
-	}
-)
 
 func NewParser() *Parser {
 	return &Parser{
@@ -110,6 +83,11 @@ func (p *Parser) Log(state ParserState) {
 		p.Parsed.Tape[p.Cursor]>>56, name[0], spew.Sdump(p.Levels))
 }
 
+// String is called when we encounter a '"' (string) node and want to get the
+// value from the string buffer. In the simdjson Tape, the string length is
+// immediately after the '"' node, so we first have to increment the Cursor
+// by one and then we use the Tape value as the string length, and create
+// a byte slice from the string buffer.
 func (p *Parser) String() string {
 	p.Cursor++
 	length := p.Parsed.Tape[p.Cursor]
@@ -118,49 +96,57 @@ func (p *Parser) String() string {
 	return string(s)
 }
 
-func (p *Parser) Deeper(t LevelType) *Level {
+// Deeper is called when we encounter a '{' or '[' node and are going "deeper"
+// into the nested JSON objects. It's important to set the 'array' param to
+// true when we encounter '[' nodes because we only want to increment the
+// global Subject counter for objects.
+func (p *Parser) Deeper(array bool) *Level {
 	var subject string
-	if t == OBJECT {
-		subject = getNextUid()
+	if !array {
+		p.SubjectCounter++
+		// TODO: use dgraph prefix and random number
+		subject = fmt.Sprintf("c.%d", p.SubjectCounter)
 	}
 	level := &Level{
-		Type:    t,
+		Array:   array,
 		Subject: subject,
 	}
 	p.Levels = append(p.Levels, level)
 	return level
 }
 
+// Subject returns the current subject based on how deeply nested we are. We
+// iterate through the Levels in reverse order (it's a stack) to find a
+// non-array Level with a subject.
 func (p *Parser) Subject() string {
-	if len(p.Levels) == 0 {
-		// NOTE: this should never happen
-		return ""
-	}
 	for i := len(p.Levels) - 1; i >= 0; i-- {
-		if p.Levels[i].Type == OBJECT {
+		if !p.Levels[i].Array {
 			return p.Levels[i].Subject
 		}
 	}
-	// NOTE: this should never happen
 	return ""
 }
 
+// Root is the initial state of the Parser. It should only look for '{' or '['
+// nodes, anything else is bad JSON.
 func (p *Parser) Root(n byte) (ParserState, error) {
 	switch n {
 	case '{':
-		p.Deeper(OBJECT)
+		p.Deeper(false)
 		return p.Object, nil
 	case '[':
-		p.Deeper(ARRAY)
+		p.Deeper(true)
 		return p.Array, nil
 	}
 	return nil, nil
 }
 
+// Object is the most common state for the Parser to be in--we're usually in an
+// object of some kind.
 func (p *Parser) Object(n byte) (ParserState, error) {
 	switch n {
 	case '{':
-		p.Deeper(OBJECT)
+		p.Deeper(false)
 		return p.Object, nil
 	case '}':
 		l := p.Levels[len(p.Levels)-1]
@@ -172,8 +158,7 @@ func (p *Parser) Object(n byte) (ParserState, error) {
 		} else {
 			if len(p.Levels) >= 2 {
 				a := p.Levels[len(p.Levels)-2]
-				// TODO: cleanup
-				if a.Type == ARRAY && a.Wait != nil && !a.Scalars {
+				if a.Array && a.Wait != nil && !a.Scalars {
 					p.Quad.Subject = a.Wait.Subject
 					p.Quad.Predicate = a.Wait.Predicate
 					p.Quad.ObjectId = l.Subject
@@ -386,12 +371,12 @@ func (p *Parser) Array(n byte) (ParserState, error) {
 	}
 	switch n {
 	case '{':
-		p.Deeper(OBJECT)
+		p.Deeper(false)
 		return p.Object, nil
 	case '}':
 		return p.Object, nil
 	case '[':
-		p.Deeper(ARRAY)
+		p.Deeper(false)
 		return p.Array, nil
 	case ']':
 		return p.Object, nil
@@ -432,7 +417,7 @@ func (p *Parser) Value(n byte) (ParserState, error) {
 			p.Cursor++
 			return p.Object, nil
 		}
-		l := p.Deeper(OBJECT)
+		l := p.Deeper(false)
 		l.Wait = p.Quad
 		p.Quad = NewQuad()
 		return p.Object, nil
@@ -441,7 +426,7 @@ func (p *Parser) Value(n byte) (ParserState, error) {
 			p.Cursor++
 			return p.Object, nil
 		}
-		l := p.Deeper(ARRAY)
+		l := p.Deeper(true)
 		l.Wait = p.Quad
 		p.Quad = NewQuad()
 		return p.Array, nil

@@ -9,8 +9,8 @@ import (
 	"github.com/dgraph-io/dgo/v2/protos/api"
 )
 
+/*
 func TestPrint(t *testing.T) {
-	nextUid = 0
 	p := NewParser()
 	if err := p.Run([]byte(`[{
 		"name": "Alice",
@@ -26,6 +26,7 @@ func TestPrint(t *testing.T) {
 	}
 	spew.Dump(p.Quads)
 }
+*/
 
 type Case struct {
 	Json      []byte
@@ -34,8 +35,6 @@ type Case struct {
 }
 
 func (c *Case) Test(t *testing.T, logs bool) {
-	nextUid = 0
-
 	p := NewParser()
 	err := p.Run(c.Json)
 	if err != nil {
