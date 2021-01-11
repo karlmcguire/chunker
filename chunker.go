@@ -143,8 +143,8 @@ func (p *Parser) Run(d []byte) (err error) {
 		if p.Cursor >= uint64(len(p.Parsed.Tape)) {
 			return
 		}
-		fmt.Printf("%v %d %c\n",
-			p.Iter.AdvanceInto(), p.Cursor, p.Parsed.Tape[p.Cursor]>>56)
+		p.Iter.AdvanceInto()
+		//fmt.Printf("%v %d %c\n", t, p.Cursor, p.Parsed.Tape[p.Cursor]>>56)
 		//p.Log(state)
 		if state, err = state(byte(p.Parsed.Tape[p.Cursor] >> 56)); err != nil {
 			return
