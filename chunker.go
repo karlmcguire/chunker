@@ -187,6 +187,8 @@ func (p *Parser) Object(n byte) (ParserState, error) {
 		}
 		p.Levels = p.Levels[:len(p.Levels)-1]
 		return p.Object, nil
+	case ']':
+		return p.Object, nil
 	case '"':
 		s := p.String()
 		if s == "uid" {
@@ -322,8 +324,10 @@ func (p *Parser) ScalarFacet(n byte) (ParserState, error) {
 
 func (p *Parser) Array(n byte) (ParserState, error) {
 	l := p.Levels[len(p.Levels)-1]
-	p.Quad.Subject = l.Wait.Subject
-	p.Quad.Predicate = l.Wait.Predicate
+	if l.Wait != nil {
+		p.Quad.Subject = l.Wait.Subject
+		p.Quad.Predicate = l.Wait.Predicate
+	}
 	switch n {
 	case '{':
 		p.Deeper(OBJECT)
