@@ -400,10 +400,21 @@ done:
 }
 
 func (p *Parser) Array(n byte) (ParserState, error) {
-	l := p.Levels.Get(0)
-	if l.Wait != nil {
-		p.Quad.Subject = l.Wait.Subject
-		p.Quad.Predicate = l.Wait.Predicate
+	// get current array level
+	a := p.Levels.Get(0)
+	// if this is a scalar array (we won't know until we get to the switch
+	// statement and set a.Scalars = true) we'll need the waiting info so we can
+	// generate a quad for each scalar
+	//
+	// for example:
+	//
+	//     "friend": ["karl", "megan", "sarah"]
+	//
+	// will generate three quads each with the same subject (unknown) and
+	// predicate ("friend")
+	if a.Wait != nil {
+		p.Quad.Subject = a.Wait.Subject
+		p.Quad.Predicate = a.Wait.Predicate
 	}
 	switch n {
 	case '{':
@@ -418,18 +429,10 @@ func (p *Parser) Array(n byte) (ParserState, error) {
 		// return to Object rather than Array because it's the default state
 		return p.Object, nil
 	case '"', 'l', 'u', 'd', 't', 'f', 'n':
-		l.Scalars = true
+		a.Scalars = true
 		p.getScalarValue(n)
 	}
 	return p.Array, nil
-}
-
-func (p *Parser) Uid(n byte) (ParserState, error) {
-	if n != '"' {
-		return nil, errors.New(fmt.Sprintf("expected uid string, instead found: %c\n", n))
-	}
-	p.Levels.FoundSubject(p.String())
-	return p.Object, nil
 }
 
 func (p *Parser) Value(n byte) (ParserState, error) {
@@ -444,6 +447,17 @@ func (p *Parser) Value(n byte) (ParserState, error) {
 	return p.Object, nil
 }
 
+// Uid is called when a "uid" string is encountered within Object. Its only job
+// is to set the uid on the current (top) Level.
+func (p *Parser) Uid(n byte) (ParserState, error) {
+	if n != '"' {
+		return nil, errors.New(fmt.Sprintf("expected uid string, instead found: %c\n", n))
+	}
+	p.Levels.FoundSubject(p.String())
+	return p.Object, nil
+}
+
+// openValueLevel is used by Value when a non-scalar value is found.
 func (p *Parser) openValueLevel(closing byte, array bool, next ParserState) ParserState {
 	// peek the next node to see if it's an empty object or array
 	if byte(p.Parsed.Tape[p.Cursor+1]>>56) == closing {
@@ -464,6 +478,7 @@ func (p *Parser) openValueLevel(closing byte, array bool, next ParserState) Pars
 	return next
 }
 
+// getScalarValue is used by Value and Array
 func (p *Parser) getScalarValue(n byte) {
 	switch n {
 	case '"':
