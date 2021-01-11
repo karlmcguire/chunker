@@ -220,40 +220,45 @@ func (p *Parser) Object(n byte) (ParserState, error) {
 		if s == "uid" {
 			return p.Uid, nil
 		}
+		// check if this is a facet definition
 		if strings.Contains(s, "|") {
 			e := strings.Split(s, "|")
 			if len(e) == 2 {
 				p.FacetPred = e[0]
 				p.Facet.Key = e[1]
-				// peek at the next node
+				// peek at the next node to see if it's a scalar facet or map
 				next := byte(p.Parsed.Tape[p.Cursor+1] >> 56)
 				if next == '{' {
+					// go into the object so MapFacet can immediately check the
+					// keys
 					p.Cursor++
 					return p.MapFacet, nil
 				}
 				return p.ScalarFacet, nil
 			}
 		} else {
+			// found a normal nquad
 			p.Quad.Subject = p.Levels.Subject()
 			p.Quad.Predicate = s
 			return p.Value, nil
 		}
+		// not sure what this string is, try again
 		return p.Object, nil
 	}
 	return nil, nil
 }
 
 func (p *Parser) MapFacet(n byte) (ParserState, error) {
-	switch n {
-	case '"':
-		id, err := strconv.Atoi(p.String())
-		if err != nil {
-			return nil, err
-		}
-		p.FacetId = id
-		return p.MapFacetVal, nil
+	// map facet keys must be (numerical) strings
+	if n != '"' {
+		return p.Object, nil
 	}
-	return p.Object, nil
+	id, err := strconv.Atoi(p.String())
+	if err != nil {
+		return nil, err
+	}
+	p.FacetId = id
+	return p.MapFacetVal, nil
 }
 
 func (p *Parser) MapFacetVal(n byte) (ParserState, error) {
