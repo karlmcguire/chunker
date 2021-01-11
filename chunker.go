@@ -119,6 +119,8 @@ type Parser struct {
 	Parsed         *json.ParsedJson
 	FacetPred      string
 	FacetId        int
+
+	Iter json.Iter
 }
 
 func NewParser() *Parser {
@@ -135,10 +137,14 @@ func (p *Parser) Run(d []byte) (err error) {
 	if p.Parsed, err = json.Parse(d, nil); err != nil {
 		return
 	}
+	p.Iter = p.Parsed.Iter()
+	p.Iter.AdvanceInto()
 	for state := p.Root; state != nil; p.Cursor++ {
 		if p.Cursor >= uint64(len(p.Parsed.Tape)) {
 			return
 		}
+		fmt.Printf("%v %d %c\n",
+			p.Iter.AdvanceInto(), p.Cursor, p.Parsed.Tape[p.Cursor]>>56)
 		//p.Log(state)
 		if state, err = state(byte(p.Parsed.Tape[p.Cursor] >> 56)); err != nil {
 			return
@@ -232,6 +238,7 @@ func (p *Parser) Object(n byte) (ParserState, error) {
 					// go into the object so MapFacet can immediately check the
 					// keys
 					p.Cursor++
+					p.Iter.AdvanceInto()
 					return p.MapFacet, nil
 				}
 				return p.ScalarFacet, nil
@@ -454,6 +461,7 @@ func (p *Parser) Value(n byte) (ParserState, error) {
 	case '{':
 		if byte(p.Parsed.Tape[p.Cursor+1]>>56) == '}' {
 			p.Cursor++
+			p.Iter.AdvanceInto()
 			return p.Object, nil
 		}
 		l := p.Levels.Deeper(false)
@@ -463,6 +471,7 @@ func (p *Parser) Value(n byte) (ParserState, error) {
 	case '[':
 		if byte(p.Parsed.Tape[p.Cursor+1]>>56) == ']' {
 			p.Cursor++
+			p.Iter.AdvanceInto()
 			return p.Object, nil
 		}
 		l := p.Levels.Deeper(true)
