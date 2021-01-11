@@ -415,34 +415,12 @@ func (p *Parser) Array(n byte) (ParserState, error) {
 		p.Levels.Deeper(false)
 		return p.Array, nil
 	case ']':
+		// return to Object rather than Array because it's the default state
 		return p.Object, nil
-	case '"':
+	case '"', 'l', 'u', 'd', 't', 'f', 'n':
 		l.Scalars = true
-		p.Quad.ObjectVal = p.String()
-	case 'l':
-		l.Scalars = true
-		p.Cursor++
-		p.Quad.ObjectVal = int64(p.Parsed.Tape[p.Cursor])
-	case 'u':
-		l.Scalars = true
-		p.Cursor++
-		p.Quad.ObjectVal = p.Parsed.Tape[p.Cursor]
-	case 'd':
-		l.Scalars = true
-		p.Cursor++
-		p.Quad.ObjectVal = math.Float64frombits(p.Parsed.Tape[p.Cursor])
-	case 't':
-		l.Scalars = true
-		p.Quad.ObjectVal = true
-	case 'f':
-		l.Scalars = true
-		p.Quad.ObjectVal = false
-	case 'n':
-		l.Scalars = true
-		p.Quad.ObjectVal = nil
+		p.getScalarValue(n)
 	}
-	p.Quads = append(p.Quads, p.Quad)
-	p.Quad = NewQuad()
 	return p.Array, nil
 }
 
@@ -469,13 +447,20 @@ func (p *Parser) Value(n byte) (ParserState, error) {
 func (p *Parser) openValueLevel(closing byte, array bool, next ParserState) ParserState {
 	// peek the next node to see if it's an empty object or array
 	if byte(p.Parsed.Tape[p.Cursor+1]>>56) == closing {
+		// it is an empty {} or [], so skip past it
 		p.Cursor++
 		p.Iter.AdvanceInto()
+		// we always return to Object even if array = true because it's the
+		// default state where most of the work gets done
 		return p.Object
 	}
+	// add a new level to the stack
 	l := p.Levels.Deeper(array)
+	// the current quad is waiting until the object is done being parsed because
+	// we have to wait until we find/generate a uid
 	l.Wait = p.Quad
 	p.Quad = NewQuad()
+	// either return to Object or Array, depending on the type
 	return next
 }
 
