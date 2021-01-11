@@ -3,17 +3,13 @@ package chunker
 import (
 	"errors"
 	"fmt"
-	"math"
-	"reflect"
-	"runtime"
 	"strconv"
 	"strings"
 
-	"github.com/davecgh/go-spew/spew"
 	"github.com/dgraph-io/dgo/v2/protos/api"
 	"github.com/dgraph-io/dgraph/types"
 	"github.com/dgraph-io/dgraph/types/facets"
-	json "github.com/minio/simdjson-go"
+	"github.com/minio/simdjson-go"
 )
 
 type Quad struct {
@@ -106,7 +102,7 @@ func (p *ParserLevels) FoundSubject(s string) {
 	p.Levels[len(p.Levels)-1].Subject = s
 }
 
-type ParserState func(byte) (ParserState, error)
+type ParserState func(simdjson.Tag) (ParserState, error)
 
 type Parser struct {
 	Cursor         uint64
@@ -116,9 +112,11 @@ type Parser struct {
 	Facet          *api.Facet
 	Quads          []*Quad
 	Levels         *ParserLevels
-	Parsed         *json.ParsedJson
+	Parsed         *simdjson.ParsedJson
 	FacetPred      string
 	FacetId        int
+
+	Iter simdjson.Iter
 }
 
 func NewParser() *Parser {
@@ -132,49 +130,27 @@ func NewParser() *Parser {
 }
 
 func (p *Parser) Run(d []byte) (err error) {
-	if p.Parsed, err = json.Parse(d, nil); err != nil {
+	if p.Parsed, err = simdjson.Parse(d, nil); err != nil {
 		return
 	}
-	for state := p.Root; state != nil; p.Cursor++ {
-		if p.Cursor >= uint64(len(p.Parsed.Tape)) {
-			return
-		}
-		//p.Log(state)
-		if state, err = state(byte(p.Parsed.Tape[p.Cursor] >> 56)); err != nil {
+	p.Iter = p.Parsed.Iter()
+	p.Iter.AdvanceInto()
+	for state := p.Root; state != nil; {
+		if state, err = state(p.Iter.AdvanceInto()); err != nil {
 			return
 		}
 	}
 	return
 }
 
-func (p *Parser) Log(state ParserState) {
-	line := runtime.FuncForPC(reflect.ValueOf(state).Pointer()).Name()
-	name := strings.Split(strings.Split(line, ".")[3], "-")
-	fmt.Printf("-> %c - %v\n%v\n",
-		p.Parsed.Tape[p.Cursor]>>56, name[0], spew.Sdump(p.Levels))
-}
-
-// String is called when we encounter a '"' (string) node and want to get the
-// value from the string buffer. In the simdjson Tape, the string length is
-// immediately after the '"' node, so we first have to increment the Cursor
-// by one and then we use the Tape value as the string length, and create
-// a byte slice from the string buffer.
-func (p *Parser) String() string {
-	p.Cursor++
-	length := p.Parsed.Tape[p.Cursor]
-	s := p.Parsed.Strings[p.StringCursor : p.StringCursor+length]
-	p.StringCursor += length
-	return string(s)
-}
-
 // Root is the initial state of the Parser. It should only look for '{' or '['
 // nodes, anything else is bad JSON.
-func (p *Parser) Root(n byte) (ParserState, error) {
-	switch n {
-	case '{':
+func (p *Parser) Root(t simdjson.Tag) (ParserState, error) {
+	switch t {
+	case simdjson.TagObjectStart:
 		p.Levels.Deeper(false)
 		return p.Object, nil
-	case '[':
+	case simdjson.TagArrayStart:
 		p.Levels.Deeper(true)
 		return p.Array, nil
 	}
@@ -183,12 +159,12 @@ func (p *Parser) Root(n byte) (ParserState, error) {
 
 // Object is the most common state for the Parser to be in--we're usually in an
 // object of some kind.
-func (p *Parser) Object(n byte) (ParserState, error) {
-	switch n {
-	case '{':
+func (p *Parser) Object(t simdjson.Tag) (ParserState, error) {
+	switch t {
+	case simdjson.TagObjectStart:
 		p.Levels.Deeper(false)
 		return p.Object, nil
-	case '}':
+	case simdjson.TagObjectEnd:
 		l := p.Levels.Get(0)
 		// check if the current level has anything waiting to be pushed, if the
 		// current level is scalars we don't push anything
@@ -212,11 +188,14 @@ func (p *Parser) Object(n byte) (ParserState, error) {
 		}
 		p.Levels.Pop()
 		return p.Object, nil
-	case ']':
+	case simdjson.TagArrayEnd:
 		p.Levels.Pop()
 		return p.Object, nil
-	case '"':
-		s := p.String()
+	case simdjson.TagString:
+		s, err := p.Iter.String()
+		if err != nil {
+			return nil, err
+		}
 		if s == "uid" {
 			return p.Uid, nil
 		}
@@ -226,6 +205,7 @@ func (p *Parser) Object(n byte) (ParserState, error) {
 			if len(e) == 2 {
 				p.FacetPred = e[0]
 				p.Facet.Key = e[1]
+				/* TODO
 				// peek at the next node to see if it's a scalar facet or map
 				next := byte(p.Parsed.Tape[p.Cursor+1] >> 56)
 				if next == '{' {
@@ -234,6 +214,7 @@ func (p *Parser) Object(n byte) (ParserState, error) {
 					p.Cursor++
 					return p.MapFacet, nil
 				}
+				*/
 				return p.ScalarFacet, nil
 			}
 		} else {
@@ -248,12 +229,16 @@ func (p *Parser) Object(n byte) (ParserState, error) {
 	return nil, nil
 }
 
-func (p *Parser) MapFacet(n byte) (ParserState, error) {
+func (p *Parser) MapFacet(t simdjson.Tag) (ParserState, error) {
 	// map facet keys must be (numerical) strings
-	if n != '"' {
+	if t != simdjson.TagString {
 		return p.Object, nil
 	}
-	id, err := strconv.Atoi(p.String())
+	s, err := p.Iter.String()
+	if err != nil {
+		return nil, err
+	}
+	id, err := strconv.Atoi(s)
 	if err != nil {
 		return nil, err
 	}
@@ -261,18 +246,21 @@ func (p *Parser) MapFacet(n byte) (ParserState, error) {
 	return p.MapFacetVal, nil
 }
 
-func (p *Parser) MapFacetVal(n byte) (ParserState, error) {
+func (p *Parser) MapFacetVal(t simdjson.Tag) (ParserState, error) {
 	var f *api.Facet
 	var err error
 	var facetVal interface{}
 
-	switch n {
-	case '"':
-		s := p.String()
-		t, err := types.ParseTime(s)
+	switch t {
+	case simdjson.TagString:
+		s, err := p.Iter.String()
+		if err != nil {
+			return nil, err
+		}
+		ti, err := types.ParseTime(s)
 		if err == nil {
 			p.Facet.ValType = api.Facet_DATETIME
-			facetVal = t
+			facetVal = ti
 		} else {
 			if f, err = facets.FacetFor(p.Facet.Key, strconv.Quote(s)); err != nil {
 				return nil, err
@@ -280,25 +268,27 @@ func (p *Parser) MapFacetVal(n byte) (ParserState, error) {
 			p.Facet = f
 			goto done
 		}
-	case 'u':
+	case simdjson.TagUint:
 		// NOTE: dgraph doesn't have uint64 facet type, so we just convert it to
 		//       int64
 		fallthrough
-	case 'l':
+	case simdjson.TagInteger:
 		p.Facet.ValType = api.Facet_INT
-		p.Cursor++
-		facetVal = int64(p.Parsed.Tape[p.Cursor])
-	case 'd':
+		if facetVal, err = p.Iter.Int(); err != nil {
+			return nil, err
+		}
+	case simdjson.TagFloat:
 		p.Facet.ValType = api.Facet_FLOAT
-		p.Cursor++
-		facetVal = math.Float64frombits(p.Parsed.Tape[p.Cursor])
-	case 't':
+		if facetVal, err = p.Iter.Float(); err != nil {
+			return nil, err
+		}
+	case simdjson.TagBoolTrue:
 		p.Facet.ValType = api.Facet_BOOL
 		facetVal = true
-	case 'f':
+	case simdjson.TagBoolFalse:
 		p.Facet.ValType = api.Facet_BOOL
 		facetVal = false
-	case 'n':
+	case simdjson.TagNull:
 		// TODO: can facets have null value?
 		return p.MapFacet, nil
 	}
@@ -337,18 +327,21 @@ done:
 	return p.MapFacet, nil
 }
 
-func (p *Parser) ScalarFacet(n byte) (ParserState, error) {
+func (p *Parser) ScalarFacet(t simdjson.Tag) (ParserState, error) {
 	var f *api.Facet
 	var err error
 	var facetVal interface{}
 
-	switch n {
-	case '"':
-		s := p.String()
-		t, err := types.ParseTime(s)
+	switch t {
+	case simdjson.TagString:
+		s, err := p.Iter.String()
+		if err != nil {
+			return nil, err
+		}
+		ti, err := types.ParseTime(s)
 		if err == nil {
 			p.Facet.ValType = api.Facet_DATETIME
-			facetVal = t
+			facetVal = ti
 		} else {
 			if f, err = facets.FacetFor(p.Facet.Key, strconv.Quote(s)); err != nil {
 				return nil, err
@@ -356,25 +349,27 @@ func (p *Parser) ScalarFacet(n byte) (ParserState, error) {
 			p.Facet = f
 			goto done
 		}
-	case 'u':
+	case simdjson.TagUint:
 		// NOTE: dgraph doesn't have uint64 facet type, so we just convert it to
 		//       int64
 		fallthrough
-	case 'l':
+	case simdjson.TagInteger:
 		p.Facet.ValType = api.Facet_INT
-		p.Cursor++
-		facetVal = int64(p.Parsed.Tape[p.Cursor])
-	case 'd':
+		if facetVal, err = p.Iter.Int(); err != nil {
+			return nil, err
+		}
+	case simdjson.TagFloat:
 		p.Facet.ValType = api.Facet_FLOAT
-		p.Cursor++
-		facetVal = math.Float64frombits(p.Parsed.Tape[p.Cursor])
-	case 't':
+		if facetVal, err = p.Iter.Float(); err != nil {
+			return nil, err
+		}
+	case simdjson.TagBoolTrue:
 		p.Facet.ValType = api.Facet_BOOL
 		facetVal = true
-	case 'f':
+	case simdjson.TagBoolFalse:
 		p.Facet.ValType = api.Facet_BOOL
 		facetVal = false
-	case 'n':
+	case simdjson.TagNull:
 		// TODO: can facets have null value?
 		return p.MapFacet, nil
 	}
@@ -402,45 +397,49 @@ done:
 	return p.Object, nil
 }
 
-func (p *Parser) Array(n byte) (ParserState, error) {
+func (p *Parser) Array(t simdjson.Tag) (ParserState, error) {
+	var err error
+
 	l := p.Levels.Get(0)
 	if l.Wait != nil {
 		p.Quad.Subject = l.Wait.Subject
 		p.Quad.Predicate = l.Wait.Predicate
 	}
-	switch n {
-	case '{':
+	switch t {
+	case simdjson.TagObjectStart:
 		p.Levels.Deeper(false)
 		return p.Object, nil
-	case '}':
+	case simdjson.TagObjectEnd:
 		return p.Object, nil
-	case '[':
+	case simdjson.TagArrayStart:
 		p.Levels.Deeper(false)
 		return p.Array, nil
-	case ']':
+	case simdjson.TagArrayEnd:
 		return p.Object, nil
-	case '"':
+	case simdjson.TagString:
 		l.Scalars = true
-		p.Quad.ObjectVal = p.String()
-	case 'l':
+		if p.Quad.ObjectVal, err = p.Iter.String(); err != nil {
+			return nil, err
+		}
+	case simdjson.TagUint:
+		fallthrough
+	case simdjson.TagInteger:
 		l.Scalars = true
-		p.Cursor++
-		p.Quad.ObjectVal = int64(p.Parsed.Tape[p.Cursor])
-	case 'u':
+		if p.Quad.ObjectVal, err = p.Iter.Int(); err != nil {
+			return nil, err
+		}
+	case simdjson.TagFloat:
 		l.Scalars = true
-		p.Cursor++
-		p.Quad.ObjectVal = p.Parsed.Tape[p.Cursor]
-	case 'd':
-		l.Scalars = true
-		p.Cursor++
-		p.Quad.ObjectVal = math.Float64frombits(p.Parsed.Tape[p.Cursor])
-	case 't':
+		if p.Quad.ObjectVal, err = p.Iter.Float(); err != nil {
+			return nil, err
+		}
+	case simdjson.TagBoolTrue:
 		l.Scalars = true
 		p.Quad.ObjectVal = true
-	case 'f':
+	case simdjson.TagBoolFalse:
 		l.Scalars = true
 		p.Quad.ObjectVal = false
-	case 'n':
+	case simdjson.TagNull:
 		l.Scalars = true
 		p.Quad.ObjectVal = nil
 	}
@@ -449,42 +448,39 @@ func (p *Parser) Array(n byte) (ParserState, error) {
 	return p.Array, nil
 }
 
-func (p *Parser) Value(n byte) (ParserState, error) {
-	switch n {
-	case '{':
-		if byte(p.Parsed.Tape[p.Cursor+1]>>56) == '}' {
-			p.Cursor++
-			return p.Object, nil
-		}
+func (p *Parser) Value(t simdjson.Tag) (ParserState, error) {
+	var err error
+
+	switch t {
+	case simdjson.TagObjectStart:
 		l := p.Levels.Deeper(false)
 		l.Wait = p.Quad
 		p.Quad = NewQuad()
 		return p.Object, nil
-	case '[':
-		if byte(p.Parsed.Tape[p.Cursor+1]>>56) == ']' {
-			p.Cursor++
-			return p.Object, nil
-		}
+	case simdjson.TagArrayStart:
 		l := p.Levels.Deeper(true)
 		l.Wait = p.Quad
 		p.Quad = NewQuad()
 		return p.Array, nil
-	case '"':
-		p.Quad.ObjectVal = p.String()
-	case 'l':
-		p.Cursor++
-		p.Quad.ObjectVal = int64(p.Parsed.Tape[p.Cursor])
-	case 'u':
-		p.Cursor++
-		p.Quad.ObjectVal = p.Parsed.Tape[p.Cursor]
-	case 'd':
-		p.Cursor++
-		p.Quad.ObjectVal = math.Float64frombits(p.Parsed.Tape[p.Cursor])
-	case 't':
+	case simdjson.TagString:
+		if p.Quad.ObjectVal, err = p.Iter.String(); err != nil {
+			return nil, err
+		}
+	case simdjson.TagUint:
+		fallthrough
+	case simdjson.TagInteger:
+		if p.Quad.ObjectVal, err = p.Iter.Int(); err != nil {
+			return nil, err
+		}
+	case simdjson.TagFloat:
+		if p.Quad.ObjectVal, err = p.Iter.Float(); err != nil {
+			return nil, err
+		}
+	case simdjson.TagBoolTrue:
 		p.Quad.ObjectVal = true
-	case 'f':
+	case simdjson.TagBoolFalse:
 		p.Quad.ObjectVal = false
-	case 'n':
+	case simdjson.TagNull:
 		p.Quad.ObjectVal = nil
 	}
 	p.Quads = append(p.Quads, p.Quad)
@@ -492,10 +488,14 @@ func (p *Parser) Value(n byte) (ParserState, error) {
 	return p.Object, nil
 }
 
-func (p *Parser) Uid(n byte) (ParserState, error) {
-	if n != '"' {
-		return nil, errors.New("expected uid, instead found: " + p.String())
+func (p *Parser) Uid(t simdjson.Tag) (ParserState, error) {
+	if t != simdjson.TagString {
+		return nil, errors.New("expected uid, instead found: " + fmt.Sprintf("%v", t))
 	}
-	p.Levels.FoundSubject(p.String())
+	s, err := p.Iter.String()
+	if err != nil {
+		return nil, err
+	}
+	p.Levels.FoundSubject(s)
 	return p.Object, nil
 }
