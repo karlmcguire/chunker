@@ -9,10 +9,10 @@ import (
 func Test(t *testing.T) {
 	p := NewParser()
 	if err := p.Run([]byte(`{
-		"friend": ["charlie", "bob", "josh"],
-		"friend|close": {
-			"0": "college",
-			"2": "work"
+		"friend": {
+			"uid": "1000",
+			"name": "charlie",
+			"name|first": true
 		}
 	}`)); err != nil {
 		t.Fatal(err)

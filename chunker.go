@@ -97,7 +97,7 @@ func (p *Parser) Run(d []byte) (err error) {
 		if p.Cursor >= uint64(len(p.Parsed.Tape)) {
 			return
 		}
-		p.Log(state)
+		//p.Log(state)
 		if state, err = state(byte(p.Parsed.Tape[p.Cursor] >> 56)); err != nil {
 			return
 		}
@@ -224,11 +224,6 @@ func (p *Parser) MapFacet(n byte) (ParserState, error) {
 		}
 		p.Facet.Id = id
 		return p.MapFacetVal, nil
-	// TODO: handle non-string indexes?
-	case 'l':
-	case 'u':
-	case '}':
-		return p.Object, nil
 	}
 	return p.Object, nil
 }
@@ -244,17 +239,25 @@ func (p *Parser) MapFacetVal(n byte) (ParserState, error) {
 	case 'f':
 	case 'n':
 	}
-	quads := make([]*Quad, 0)
+	c := 0
 	for i := len(p.Quads) - 1; i >= 0; i-- {
+		fmt.Println("------------", c, p.Facet.Id, len(p.Quads)-1, p.Facet)
 		if p.Quads[i].Predicate == p.Facet.For {
-			quads = append(quads, p.Quads[i])
+			if c == len(p.Quads)-1-p.Facet.Id {
+				p.Quads[i].Facets = append(p.Quads[i].Facets, p.Facet)
+				facetFor, facetKey := p.Facet.For, p.Facet.Key
+				p.Facet = &Facet{
+					For: facetFor,
+					Key: facetKey,
+				}
+				return p.MapFacet, nil
+			}
+			c++
 		} else {
 			break
 		}
 	}
-	// TODO:
-	quads[len(quads)-1-p.Facet.Id].Facets = append(quads[len(quads)-1-p.Facet.Id].Facets, p.Facet)
-	p.Facet = &Facet{}
+	fmt.Println()
 	return p.MapFacet, nil
 }
 
