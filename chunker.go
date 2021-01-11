@@ -10,27 +10,23 @@ import (
 	"strings"
 
 	"github.com/davecgh/go-spew/spew"
+	"github.com/dgraph-io/dgo/v2/protos/api"
+	"github.com/dgraph-io/dgraph/types"
+	"github.com/dgraph-io/dgraph/types/facets"
 	json "github.com/minio/simdjson-go"
 )
-
-type Facet struct {
-	Id  int
-	For string
-	Key string
-	Val interface{}
-}
 
 type Quad struct {
 	Subject   string
 	Predicate string
 	ObjectId  string
 	ObjectVal interface{}
-	Facets    []*Facet
+	Facets    []*api.Facet
 }
 
 func NewQuad() *Quad {
 	return &Quad{
-		Facets: make([]*Facet, 0),
+		Facets: make([]*api.Facet, 0),
 	}
 }
 
@@ -72,10 +68,12 @@ type (
 		Cursor       uint64
 		StringCursor uint64
 		Quad         *Quad
-		Facet        *Facet
+		Facet        *api.Facet
 		Quads        []*Quad
 		Levels       []*Level
 		Parsed       *json.ParsedJson
+		FacetPred    string
+		FacetId      int
 	}
 )
 
@@ -85,7 +83,7 @@ func NewParser() *Parser {
 		Quad:   NewQuad(),
 		Quads:  make([]*Quad, 0),
 		Levels: make([]*Level, 0),
-		Facet:  &Facet{},
+		Facet:  &api.Facet{},
 	}
 }
 
@@ -135,16 +133,16 @@ func (p *Parser) Deeper(t LevelType) *Level {
 
 func (p *Parser) Subject() string {
 	if len(p.Levels) == 0 {
-		// TODO:
-		return "eeeeeeeeee"
+		// NOTE: this should never happen
+		return ""
 	}
 	for i := len(p.Levels) - 1; i >= 0; i-- {
 		if p.Levels[i].Type == OBJECT {
 			return p.Levels[i].Subject
 		}
 	}
-	// TODO:
-	return "xxxxxxxxx"
+	// NOTE: this should never happen
+	return ""
 }
 
 func (p *Parser) Root(n byte) (ParserState, error) {
@@ -198,7 +196,7 @@ func (p *Parser) Object(n byte) (ParserState, error) {
 		if strings.Contains(s, "|") {
 			e := strings.Split(s, "|")
 			if len(e) == 2 {
-				p.Facet.For = e[0]
+				p.FacetPred = e[0]
 				p.Facet.Key = e[1]
 				// peek at the next node
 				next := byte(p.Parsed.Tape[p.Cursor+1] >> 56)
@@ -225,42 +223,75 @@ func (p *Parser) MapFacet(n byte) (ParserState, error) {
 		if err != nil {
 			return nil, err
 		}
-		p.Facet.Id = id
+		p.FacetId = id
 		return p.MapFacetVal, nil
 	case '}':
 		// TODO: document why this is important
-		p.Facet = &Facet{}
+		p.Facet = &api.Facet{}
 	}
 	return p.Object, nil
 }
 
 func (p *Parser) MapFacetVal(n byte) (ParserState, error) {
+	var f *api.Facet
+	var err error
+	var facetVal interface{}
+
 	switch n {
 	case '"':
-		p.Facet.Val = p.String()
-	case 'l':
-		p.Cursor++
-		p.Facet.Val = int64(p.Parsed.Tape[p.Cursor])
+		s := p.String()
+		t, err := types.ParseTime(s)
+		if err == nil {
+			p.Facet.ValType = api.Facet_DATETIME
+			facetVal = t
+		} else {
+			/*
+				p.Facet.ValType = api.Facet_STRING
+				facetVal = s
+			*/
+
+			if f, err = facets.FacetFor(p.Facet.Key, strconv.Quote(s)); err != nil {
+				return nil, err
+			}
+			p.Facet = f
+			goto done
+		}
 	case 'u':
+		// NOTE: dgraph doesn't have uint64 facet type, so we just convert it to
+		//       int64
+		fallthrough
+	case 'l':
+		p.Facet.ValType = api.Facet_INT
 		p.Cursor++
-		p.Facet.Val = p.Parsed.Tape[p.Cursor]
+		facetVal = int64(p.Parsed.Tape[p.Cursor])
 	case 'd':
+		p.Facet.ValType = api.Facet_FLOAT
 		p.Cursor++
-		p.Facet.Val = math.Float64frombits(p.Parsed.Tape[p.Cursor])
+		facetVal = math.Float64frombits(p.Parsed.Tape[p.Cursor])
 	case 't':
-		p.Facet.Val = true
+		p.Facet.ValType = api.Facet_BOOL
+		facetVal = true
 	case 'f':
-		p.Facet.Val = false
+		p.Facet.ValType = api.Facet_BOOL
+		facetVal = false
 	case 'n':
-		p.Facet.Val = nil
+		// TODO: can facets have null value?
+		return p.MapFacet, nil
 	}
+
+	if f, err = facets.ToBinary(p.Facet.Key, facetVal, p.Facet.ValType); err != nil {
+		return nil, err
+	}
+	p.Facet = f
+
+done:
 	// TODO: move this to a cache so we only have to grab referenced quads once
 	//       per facet map definition, rather than for each index-value
 	//
 	// find every quad that could be referenced by the facet
 	quads := make([]*Quad, 0)
 	for i := len(p.Quads) - 1; i >= 0; i-- {
-		if p.Quads[i].Predicate == p.Facet.For {
+		if p.Quads[i].Predicate == p.FacetPred {
 			quads = append(quads, p.Quads[i])
 			/*
 				// TODO: if we want to only allow map facet definitions directly
@@ -270,16 +301,12 @@ func (p *Parser) MapFacetVal(n byte) (ParserState, error) {
 			*/
 		}
 	}
-
 	for i := len(quads) - 1; i >= 0; i-- {
-		if i == len(quads)-1-p.Facet.Id {
+		if i == len(quads)-1-p.FacetId {
 			quads[i].Facets = append(quads[i].Facets, p.Facet)
 			// make new facet
-			facetFor, facetKey := p.Facet.For, p.Facet.Key
-			p.Facet = &Facet{
-				For: facetFor,
-				Key: facetKey,
-			}
+			facetKey := p.Facet.Key
+			p.Facet = &api.Facet{Key: facetKey}
 			return p.MapFacet, nil
 		}
 	}
@@ -287,36 +314,64 @@ func (p *Parser) MapFacetVal(n byte) (ParserState, error) {
 }
 
 func (p *Parser) ScalarFacet(n byte) (ParserState, error) {
+	var f *api.Facet
+	var err error
+	var facetVal interface{}
+
 	switch n {
 	case '"':
-		p.Facet.Val = p.String()
-	case 'l':
-		p.Cursor++
-		p.Facet.Val = int64(p.Parsed.Tape[p.Cursor])
+		s := p.String()
+		t, err := types.ParseTime(s)
+		if err == nil {
+			p.Facet.ValType = api.Facet_DATETIME
+			facetVal = t
+		} else {
+			if f, err = facets.FacetFor(p.Facet.Key, strconv.Quote(s)); err != nil {
+				return nil, err
+			}
+			p.Facet = f
+			goto done
+		}
 	case 'u':
+		// NOTE: dgraph doesn't have uint64 facet type, so we just convert it to
+		//       int64
+		fallthrough
+	case 'l':
+		p.Facet.ValType = api.Facet_INT
 		p.Cursor++
-		p.Facet.Val = p.Parsed.Tape[p.Cursor]
+		facetVal = int64(p.Parsed.Tape[p.Cursor])
 	case 'd':
+		p.Facet.ValType = api.Facet_FLOAT
 		p.Cursor++
-		p.Facet.Val = math.Float64frombits(p.Parsed.Tape[p.Cursor])
+		facetVal = math.Float64frombits(p.Parsed.Tape[p.Cursor])
 	case 't':
-		p.Facet.Val = true
+		p.Facet.ValType = api.Facet_BOOL
+		facetVal = true
 	case 'f':
-		p.Facet.Val = false
+		p.Facet.ValType = api.Facet_BOOL
+		facetVal = false
 	case 'n':
-		p.Facet.Val = nil
+		// TODO: can facets have null value?
+		return p.MapFacet, nil
 	}
+
+	if f, err = facets.ToBinary(p.Facet.Key, facetVal, p.Facet.ValType); err != nil {
+		return nil, err
+	}
+	p.Facet = f
+
+done:
 	for i := len(p.Levels) - 1; i >= 0; i-- {
-		if p.Levels[i].Wait != nil && p.Levels[i].Wait.Predicate == p.Facet.For {
+		if p.Levels[i].Wait != nil && p.Levels[i].Wait.Predicate == p.FacetPred {
 			p.Levels[i].Wait.Facets = append(p.Levels[i].Wait.Facets, p.Facet)
-			p.Facet = &Facet{}
+			p.Facet = &api.Facet{}
 			return p.Object, nil
 		}
 	}
 	for i := len(p.Quads) - 1; i >= 0; i-- {
-		if p.Quads[i].Predicate == p.Facet.For {
+		if p.Quads[i].Predicate == p.FacetPred {
 			p.Quads[i].Facets = append(p.Quads[i].Facets, p.Facet)
-			p.Facet = &Facet{}
+			p.Facet = &api.Facet{}
 			return p.Object, nil
 		}
 	}

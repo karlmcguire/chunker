@@ -1,30 +1,27 @@
 package chunker
 
 import (
+	"bytes"
 	"reflect"
 	"testing"
 
 	"github.com/davecgh/go-spew/spew"
+	"github.com/dgraph-io/dgo/v2/protos/api"
 )
 
 func TestPrint(t *testing.T) {
 	nextUid = 0
 	p := NewParser()
-	if err := p.Run([]byte(`{
+	if err := p.Run([]byte(`[{
 		"name": "Alice",
-		"address": {},
-		"friend": [
-			{
-				"name": "Charlie",
-				"married": false,
-				"address": {}
-			}, {
-				"uid": "1000",
-				"name": "Bob",
-				"address": {}
-			}
-		]
-	}`)); err != nil {
+		"mobile": "040123456",
+		"car": "MA0123",
+		"mobile|operation": "READ WRITE",
+		"car|first": true,
+		"car|age": 3,
+		"car|price": 30000.56,
+		"car|since": "2006-01-02T15:04:05Z"
+	}]`)); err != nil {
 		t.Fatal(err)
 	}
 	spew.Dump(p.Quads)
@@ -111,41 +108,39 @@ func (c *Case) Test(t *testing.T, logs bool) {
 		default:
 			t.Fatal("objectVal type not handled")
 		}
-		/*
-			// check facets
-			if len(c.Quads[i].Facets) > 0 {
-				if quad.Facets == nil || len(quad.Facets) == 0 {
-					t.Fatalf("expected facets for quad %d, but found none\n", i)
+		// check facets
+		if len(c.Quads[i].Facets) > 0 {
+			if quad.Facets == nil || len(quad.Facets) == 0 {
+				t.Fatalf("expected facets for quad %d, but found none\n", i)
+			}
+			for j, facet := range quad.Facets {
+				if facet.ValType != c.Quads[i].Facets[j].ValType {
+					spew.Dump(facet)
+					spew.Dump(c.Quads[i].Facets[j])
+					t.Fatalf("expected %s valType for quad %d facet %d but got %s\n",
+						c.Quads[i].Facets[j].ValType.String(), i, j, facet.ValType.String())
 				}
-				for j, facet := range quad.Facets {
-					if facet.ValType != c.Quads[i].Facets[j].ValType {
-						spew.Dump(facet)
-						spew.Dump(c.Quads[i].Facets[j])
-						t.Fatalf("expected %s valType for quad %d facet %d but got %s\n",
-							c.Quads[i].Facets[j].ValType.String(), i, j, facet.ValType.String())
+				if !bytes.Equal(facet.Value, c.Quads[i].Facets[j].Value) {
+					spew.Dump(facet)
+					t.Fatalf("expected %v value for quad %d facet %d but got %v\n",
+						c.Quads[i].Facets[j].Value, i, j, facet.Value)
+				}
+				// check facet tokens
+				if len(c.Quads[i].Facets[j].Tokens) > 0 {
+					if facet.Tokens == nil || len(facet.Tokens) == 0 {
+						t.Fatalf("expected tokens for quad %d facet %d but found none\n",
+							i, j)
 					}
-					if !bytes.Equal(facet.Value, c.Quads[i].Facets[j].Value) {
-						spew.Dump(facet)
-						t.Fatalf("expected %v value for quad %d facet %d but got %v\n",
-							c.Quads[i].Facets[j].Value, i, j, facet.Value)
-					}
-					// check facet tokens
-					if len(c.Quads[i].Facets[j].Tokens) > 0 {
-						if facet.Tokens == nil || len(facet.Tokens) == 0 {
-							t.Fatalf("expected tokens for quad %d facet %d but found none\n",
-								i, j)
-						}
-						for k, token := range facet.Tokens {
-							if token != c.Quads[i].Facets[j].Tokens[k] {
-								t.Fatalf("expected token '%s' for quad %d facet %d but found '%s'\n",
-									c.Quads[i].Facets[j].Tokens[k], i, j, token)
-							}
+					for k, token := range facet.Tokens {
+						if token != c.Quads[i].Facets[j].Tokens[k] {
+							t.Fatalf("expected token '%s' for quad %d facet %d but found '%s'\n",
+								c.Quads[i].Facets[j].Tokens[k], i, j, token)
 						}
 					}
 				}
 			}
+		}
 
-		*/
 	}
 }
 
@@ -231,7 +226,6 @@ func TestNumbers(t *testing.T) {
 	}
 }
 
-/*
 func TestFacetsScalar(t *testing.T) {
 	c := &Case{
 		Json: []byte(`[{
@@ -254,9 +248,9 @@ func TestFacetsScalar(t *testing.T) {
 			Predicate: "mobile",
 			ObjectId:  "",
 			ObjectVal: "040123456",
-			Facets: []*Facet{{
+			Facets: []*api.Facet{{
 				Key:     "operation",
-				ValType: STRING,
+				ValType: api.Facet_STRING,
 				Value:   []byte(`READ WRITE`),
 				Tokens:  []string{"\x01read", "\x01write"},
 			}},
@@ -265,27 +259,27 @@ func TestFacetsScalar(t *testing.T) {
 			Predicate: "car",
 			ObjectId:  "",
 			ObjectVal: "MA0123",
-			Facets: []*Facet{{
+			Facets: []*api.Facet{{
 				Key:     "first",
-				ValType: BOOL,
+				ValType: api.Facet_BOOL,
 				Value:   []byte{0x01},
 			}, {
 				Key:     "age",
-				ValType: INT,
+				ValType: api.Facet_INT,
 				Value: []byte{
 					0x03, 0x00, 0x00, 0x00,
 					0x00, 0x00, 0x00, 0x00,
 				},
 			}, {
 				Key:     "price",
-				ValType: FLOAT,
+				ValType: api.Facet_FLOAT,
 				Value: []byte{
 					0x71, 0x3d, 0x0a, 0xd7,
 					0x23, 0x4c, 0xdd, 0x40,
 				},
 			}, {
 				Key:     "since",
-				ValType: DATETIME,
+				ValType: api.Facet_DATETIME,
 				Value: []byte{
 					0x01, 0x00, 0x00, 0x00,
 					0x0e, 0xbb, 0x4b, 0x37,
@@ -320,9 +314,9 @@ func TestFacetsMap(t *testing.T) {
 			Subject:   "c.1",
 			Predicate: "friend",
 			ObjectVal: "Joshua",
-			Facets: []*Facet{{
+			Facets: []*api.Facet{{
 				Key:     "from",
-				ValType: STRING,
+				ValType: api.Facet_STRING,
 				Value:   []byte("school"),
 				Tokens:  []string{"\x01school"},
 			}},
@@ -330,11 +324,11 @@ func TestFacetsMap(t *testing.T) {
 			Subject:   "c.1",
 			Predicate: "friend",
 			ObjectVal: "David",
-			Facets: []*Facet{{
+			Facets: []*api.Facet{{
 				Key:     "age",
-				ValType: INT,
+				ValType: api.Facet_INT,
 				Value: []byte{
-					0x24, 0x00, 0x00, 0x00,
+					20, 0x00, 0x00, 0x00,
 					0x00, 0x00, 0x00, 0x00,
 				},
 			}},
@@ -342,24 +336,23 @@ func TestFacetsMap(t *testing.T) {
 			Subject:   "c.1",
 			Predicate: "friend",
 			ObjectVal: "Josh",
-			Facets: []*Facet{{
-				Key:     "age",
-				ValType: INT,
-				Value: []byte{
-					0x25, 0x00, 0x00, 0x00,
-					0x00, 0x00, 0x00, 0x00,
-				},
-			}, {
+			Facets: []*api.Facet{{
 				Key:     "from",
-				ValType: STRING,
+				ValType: api.Facet_STRING,
 				Value:   []byte("college"),
 				Tokens:  []string{"\x01college"},
+			}, {
+				Key:     "age",
+				ValType: api.Facet_INT,
+				Value: []byte{
+					21, 0x00, 0x00, 0x00,
+					0x00, 0x00, 0x00, 0x00,
+				},
 			}},
 		}},
 	}
 	c.Test(t, true)
 }
-*/
 
 func Test1(t *testing.T) {
 	c := &Case{
