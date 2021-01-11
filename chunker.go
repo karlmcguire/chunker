@@ -4,12 +4,9 @@ import (
 	"errors"
 	"fmt"
 	"math"
-	"reflect"
-	"runtime"
 	"strconv"
 	"strings"
 
-	"github.com/davecgh/go-spew/spew"
 	"github.com/dgraph-io/dgo/v2/protos/api"
 	"github.com/dgraph-io/dgraph/types"
 	"github.com/dgraph-io/dgraph/types/facets"
@@ -144,20 +141,13 @@ func (p *Parser) Run(d []byte) (err error) {
 			return
 		}
 		p.Iter.AdvanceInto()
+		//t := p.Iter.AdvanceInto()
 		//fmt.Printf("%v %d %c\n", t, p.Cursor, p.Parsed.Tape[p.Cursor]>>56)
-		//p.Log(state)
 		if state, err = state(byte(p.Parsed.Tape[p.Cursor] >> 56)); err != nil {
 			return
 		}
 	}
 	return
-}
-
-func (p *Parser) Log(state ParserState) {
-	line := runtime.FuncForPC(reflect.ValueOf(state).Pointer()).Name()
-	name := strings.Split(strings.Split(line, ".")[3], "-")
-	fmt.Printf("-> %c - %v\n%v\n",
-		p.Parsed.Tape[p.Cursor]>>56, name[0], spew.Sdump(p.Levels))
 }
 
 // String is called when we encounter a '"' (string) node and want to get the
@@ -456,28 +446,41 @@ func (p *Parser) Array(n byte) (ParserState, error) {
 	return p.Array, nil
 }
 
+func (p *Parser) Uid(n byte) (ParserState, error) {
+	if n != '"' {
+		return nil, errors.New(fmt.Sprintf("expected uid string, instead found: %c\n", n))
+	}
+	p.Levels.FoundSubject(p.String())
+	return p.Object, nil
+}
+
 func (p *Parser) Value(n byte) (ParserState, error) {
 	switch n {
 	case '{':
-		if byte(p.Parsed.Tape[p.Cursor+1]>>56) == '}' {
-			p.Cursor++
-			p.Iter.AdvanceInto()
-			return p.Object, nil
-		}
-		l := p.Levels.Deeper(false)
-		l.Wait = p.Quad
-		p.Quad = NewQuad()
-		return p.Object, nil
+		return p.openValueLevel('}', false, p.Object), nil
 	case '[':
-		if byte(p.Parsed.Tape[p.Cursor+1]>>56) == ']' {
-			p.Cursor++
-			p.Iter.AdvanceInto()
-			return p.Object, nil
-		}
-		l := p.Levels.Deeper(true)
-		l.Wait = p.Quad
-		p.Quad = NewQuad()
-		return p.Array, nil
+		return p.openValueLevel(']', true, p.Array), nil
+	case '"', 'l', 'u', 'd', 't', 'f', 'n':
+		p.getScalarValue(n)
+	}
+	return p.Object, nil
+}
+
+func (p *Parser) openValueLevel(closing byte, array bool, next ParserState) ParserState {
+	// peek the next node to see if it's an empty object or array
+	if byte(p.Parsed.Tape[p.Cursor+1]>>56) == closing {
+		p.Cursor++
+		p.Iter.AdvanceInto()
+		return p.Object
+	}
+	l := p.Levels.Deeper(array)
+	l.Wait = p.Quad
+	p.Quad = NewQuad()
+	return next
+}
+
+func (p *Parser) getScalarValue(n byte) {
+	switch n {
 	case '"':
 		p.Quad.ObjectVal = p.String()
 	case 'l':
@@ -498,13 +501,4 @@ func (p *Parser) Value(n byte) (ParserState, error) {
 	}
 	p.Quads = append(p.Quads, p.Quad)
 	p.Quad = NewQuad()
-	return p.Object, nil
-}
-
-func (p *Parser) Uid(n byte) (ParserState, error) {
-	if n != '"' {
-		return nil, errors.New("expected uid, instead found: " + p.String())
-	}
-	p.Levels.FoundSubject(p.String())
-	return p.Object, nil
 }
