@@ -167,11 +167,6 @@ func (p *Parser) Object(n byte) (ParserState, error) {
 	case '}':
 		l := p.Levels[len(p.Levels)-1]
 		if l.Wait != nil && !l.Scalars {
-			fmt.Println()
-			fmt.Println()
-			fmt.Println("ADDDDDDDDDDDDDDDDDING: ", l.Wait)
-			fmt.Println()
-			fmt.Println()
 			p.Quad = l.Wait
 			p.Quad.ObjectId = l.Subject
 			p.Quads = append(p.Quads, p.Quad)
@@ -180,7 +175,7 @@ func (p *Parser) Object(n byte) (ParserState, error) {
 			if len(p.Levels) >= 2 {
 				a := p.Levels[len(p.Levels)-2]
 				// TODO: cleanup
-				if a.Type == ARRAY && a.Wait != nil {
+				if a.Type == ARRAY && a.Wait != nil && !a.Scalars {
 					p.Quad.Subject = a.Wait.Subject
 					p.Quad.Predicate = a.Wait.Predicate
 					p.Quad.ObjectId = l.Subject
@@ -256,12 +251,20 @@ func (p *Parser) MapFacetVal(n byte) (ParserState, error) {
 	case 'n':
 		p.Facet.Val = nil
 	}
+	// TODO: move this to a cache so we only have to grab referenced quads once
+	//       per facet map definition, rather than for each index-value
+	//
+	// find every quad that could be referenced by the facet
 	quads := make([]*Quad, 0)
 	for i := len(p.Quads) - 1; i >= 0; i-- {
 		if p.Quads[i].Predicate == p.Facet.For {
 			quads = append(quads, p.Quads[i])
-		} else {
-			break
+			/*
+				// TODO: if we want to only allow map facet definitions directly
+				//       under the quad definition, uncomment this
+				} else {
+					break
+			*/
 		}
 	}
 
