@@ -6,6 +6,7 @@ import (
 	"math"
 	"reflect"
 	"runtime"
+	"strconv"
 	"strings"
 
 	"github.com/davecgh/go-spew/spew"
@@ -13,6 +14,7 @@ import (
 )
 
 type Facet struct {
+	Id  int
 	For string
 	Key string
 	Val interface{}
@@ -172,6 +174,7 @@ func (p *Parser) Object(n byte) (ParserState, error) {
 		} else {
 			if len(p.Levels) >= 2 {
 				a := p.Levels[len(p.Levels)-2]
+				// TODO: cleanup
 				if a.Type == ARRAY && a.Wait != nil {
 					p.Quad.Subject = a.Wait.Subject
 					p.Quad.Predicate = a.Wait.Predicate
@@ -194,6 +197,12 @@ func (p *Parser) Object(n byte) (ParserState, error) {
 			if len(e) == 2 {
 				p.Facet.For = e[0]
 				p.Facet.Key = e[1]
+				// peek at the next node
+				next := byte(p.Parsed.Tape[p.Cursor+1] >> 56)
+				if next == '{' {
+					p.Cursor++
+					return p.MapFacet, nil
+				}
 				return p.ScalarFacet, nil
 			}
 		} else {
@@ -206,16 +215,69 @@ func (p *Parser) Object(n byte) (ParserState, error) {
 	return nil, nil
 }
 
+func (p *Parser) MapFacet(n byte) (ParserState, error) {
+	switch n {
+	case '"':
+		id, err := strconv.Atoi(p.String())
+		if err != nil {
+			return nil, err
+		}
+		p.Facet.Id = id
+		return p.MapFacetVal, nil
+	// TODO: handle non-string indexes?
+	case 'l':
+	case 'u':
+	case '}':
+		return p.Object, nil
+	}
+	return p.Object, nil
+}
+
+func (p *Parser) MapFacetVal(n byte) (ParserState, error) {
+	switch n {
+	case '"':
+		p.Facet.Val = p.String()
+	case 'l':
+	case 'u':
+	case 'd':
+	case 't':
+	case 'f':
+	case 'n':
+	}
+	quads := make([]*Quad, 0)
+	for i := len(p.Quads) - 1; i >= 0; i-- {
+		if p.Quads[i].Predicate == p.Facet.For {
+			quads = append(quads, p.Quads[i])
+		} else {
+			break
+		}
+	}
+	// TODO:
+	quads[len(quads)-1-p.Facet.Id].Facets = append(quads[len(quads)-1-p.Facet.Id].Facets, p.Facet)
+	p.Facet = &Facet{}
+	return p.MapFacet, nil
+}
+
 func (p *Parser) ScalarFacet(n byte) (ParserState, error) {
 	switch n {
 	case '"':
 		p.Facet.Val = p.String()
+	case 'l':
+		p.Cursor++
+		p.Facet.Val = int64(p.Parsed.Tape[p.Cursor])
+	case 'u':
+		p.Cursor++
+		p.Facet.Val = p.Parsed.Tape[p.Cursor]
+	case 'd':
+		p.Cursor++
+		p.Facet.Val = math.Float64frombits(p.Parsed.Tape[p.Cursor])
 	case 't':
 		p.Facet.Val = true
+	case 'f':
+		p.Facet.Val = false
+	case 'n':
+		p.Facet.Val = nil
 	}
-	fmt.Println("---------------------------")
-	spew.Dump(p.Levels)
-	fmt.Println("---------------------------")
 	for i := len(p.Levels) - 1; i >= 0; i-- {
 		if p.Levels[i].Wait != nil && p.Levels[i].Wait.Predicate == p.Facet.For {
 			p.Levels[i].Wait.Facets = append(p.Levels[i].Wait.Facets, p.Facet)
