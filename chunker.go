@@ -269,53 +269,10 @@ func (p *Parser) MapFacet(n byte) (ParserState, error) {
 }
 
 func (p *Parser) MapFacetVal(n byte) (ParserState, error) {
-	var f *api.Facet
-	var err error
-	var facetVal interface{}
-
-	switch n {
-	case '"':
-		s := p.String()
-		t, err := types.ParseTime(s)
-		if err == nil {
-			p.Facet.ValType = api.Facet_DATETIME
-			facetVal = t
-		} else {
-			if f, err = facets.FacetFor(p.Facet.Key, strconv.Quote(s)); err != nil {
-				return nil, err
-			}
-			p.Facet = f
-			goto done
-		}
-	case 'u':
-		// NOTE: dgraph doesn't have uint64 facet type, so we just convert it to
-		//       int64
-		fallthrough
-	case 'l':
-		p.Facet.ValType = api.Facet_INT
-		p.Cursor++
-		facetVal = int64(p.Parsed.Tape[p.Cursor])
-	case 'd':
-		p.Facet.ValType = api.Facet_FLOAT
-		p.Cursor++
-		facetVal = math.Float64frombits(p.Parsed.Tape[p.Cursor])
-	case 't':
-		p.Facet.ValType = api.Facet_BOOL
-		facetVal = true
-	case 'f':
-		p.Facet.ValType = api.Facet_BOOL
-		facetVal = false
-	case 'n':
-		// TODO: can facets have null value?
-		return p.MapFacet, nil
-	}
-
-	if f, err = facets.ToBinary(p.Facet.Key, facetVal, p.Facet.ValType); err != nil {
+	if err := p.getFacet(n); err != nil {
 		return nil, err
 	}
-	p.Facet = f
 
-done:
 	// TODO: move this to a cache so we only have to grab referenced quads once
 	//       per facet map definition, rather than for each index-value
 	//
@@ -324,12 +281,6 @@ done:
 	for i := len(p.Quads) - 1; i >= 0; i-- {
 		if p.Quads[i].Predicate == p.FacetPred {
 			quads = append(quads, p.Quads[i])
-			/*
-				// TODO: if we want to only allow map facet definitions directly
-				//       under the quad definition, uncomment this
-				} else {
-					break
-			*/
 		}
 	}
 	for i := len(quads) - 1; i >= 0; i-- {
@@ -345,57 +296,19 @@ done:
 }
 
 func (p *Parser) ScalarFacet(n byte) (ParserState, error) {
-	var f *api.Facet
-	var err error
-	var facetVal interface{}
-
-	switch n {
-	case '"':
-		s := p.String()
-		t, err := types.ParseTime(s)
-		if err == nil {
-			p.Facet.ValType = api.Facet_DATETIME
-			facetVal = t
-		} else {
-			if f, err = facets.FacetFor(p.Facet.Key, strconv.Quote(s)); err != nil {
-				return nil, err
-			}
-			p.Facet = f
-			goto done
-		}
-	case 'u':
-		// NOTE: dgraph doesn't have uint64 facet type, so we just convert it to
-		//       int64
-		fallthrough
-	case 'l':
-		p.Facet.ValType = api.Facet_INT
-		p.Cursor++
-		facetVal = int64(p.Parsed.Tape[p.Cursor])
-	case 'd':
-		p.Facet.ValType = api.Facet_FLOAT
-		p.Cursor++
-		facetVal = math.Float64frombits(p.Parsed.Tape[p.Cursor])
-	case 't':
-		p.Facet.ValType = api.Facet_BOOL
-		facetVal = true
-	case 'f':
-		p.Facet.ValType = api.Facet_BOOL
-		facetVal = false
-	case 'n':
-		// TODO: can facets have null value?
-		return p.MapFacet, nil
-	}
-
-	if f, err = facets.ToBinary(p.Facet.Key, facetVal, p.Facet.ValType); err != nil {
+	if err := p.getFacet(n); err != nil {
 		return nil, err
 	}
-	p.Facet = f
-
-done:
 	if p.Levels.FoundScalarFacet(p.FacetPred, p.Facet) {
 		return p.Object, nil
 	}
-	p.foundScalarFacet()
+	for i := len(p.Quads) - 1; i >= 0; i-- {
+		if p.Quads[i].Predicate == p.FacetPred {
+			p.Quads[i].Facets = append(p.Quads[i].Facets, p.Facet)
+			p.Facet = &api.Facet{}
+			return p.Object, nil
+		}
+	}
 	return p.Object, nil
 }
 
@@ -457,6 +370,31 @@ func (p *Parser) Uid(n byte) (ParserState, error) {
 	return p.Object, nil
 }
 
+func (p *Parser) getFacet(n byte) error {
+	var err error
+	var val interface{}
+	switch n {
+	case '"':
+		s := p.String()
+		t, err := types.ParseTime(s)
+		if err == nil {
+			p.Facet.ValType = api.Facet_DATETIME
+			val = t
+		} else {
+			if p.Facet, err = facets.FacetFor(p.Facet.Key, strconv.Quote(s)); err != nil {
+				return err
+			}
+			return nil
+		}
+	case 'l', 'u', 'd', 't', 'f', 'n':
+		val = p.getFacetValue(n)
+	}
+	if p.Facet, err = facets.ToBinary(p.Facet.Key, val, p.Facet.ValType); err != nil {
+		return err
+	}
+	return nil
+}
+
 // openValueLevel is used by Value when a non-scalar value is found.
 func (p *Parser) openValueLevel(closing byte, array bool, next ParserState) ParserState {
 	// peek the next node to see if it's an empty object or array
@@ -503,13 +441,29 @@ func (p *Parser) getScalarValue(n byte) {
 	p.Quad = NewQuad()
 }
 
-func (p *Parser) foundScalarFacet() bool {
-	for i := len(p.Quads) - 1; i >= 0; i-- {
-		if p.Quads[i].Predicate == p.FacetPred {
-			p.Quads[i].Facets = append(p.Quads[i].Facets, p.Facet)
-			p.Facet = &api.Facet{}
-			return true
-		}
+func (p *Parser) getFacetValue(n byte) interface{} {
+	var val interface{}
+	switch n {
+	case 'u':
+		// NOTE: dgraph doesn't have uint64 facet type, so we just convert it to
+		//       int64
+		fallthrough
+	case 'l':
+		p.Facet.ValType = api.Facet_INT
+		p.Cursor++
+		val = int64(p.Parsed.Tape[p.Cursor])
+	case 'd':
+		p.Facet.ValType = api.Facet_FLOAT
+		p.Cursor++
+		val = math.Float64frombits(p.Parsed.Tape[p.Cursor])
+	case 't':
+		p.Facet.ValType = api.Facet_BOOL
+		val = true
+	case 'f':
+		p.Facet.ValType = api.Facet_BOOL
+		val = false
+	// TODO: can facets have null values?
+	case 'n':
 	}
-	return false
+	return val
 }
