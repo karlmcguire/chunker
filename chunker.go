@@ -43,6 +43,16 @@ func NewParserLevels() *ParserLevels {
 	}
 }
 
+func (p *ParserLevels) FoundScalarFacet(predicate string, facet *api.Facet) bool {
+	for i := len(p.Levels) - 1; i >= 0; i-- {
+		if p.Levels[i].Wait != nil && p.Levels[i].Wait.Predicate == predicate {
+			p.Levels[i].Wait.Facets = append(p.Levels[i].Wait.Facets, facet)
+			return true
+		}
+	}
+	return false
+}
+
 func (p *ParserLevels) Pop() *ParserLevel {
 	if len(p.Levels) == 0 {
 		return nil
@@ -382,20 +392,10 @@ func (p *Parser) ScalarFacet(n byte) (ParserState, error) {
 	p.Facet = f
 
 done:
-	for i := len(p.Levels.Levels) - 1; i >= 0; i-- {
-		if p.Levels.Levels[i].Wait != nil && p.Levels.Levels[i].Wait.Predicate == p.FacetPred {
-			p.Levels.Levels[i].Wait.Facets = append(p.Levels.Levels[i].Wait.Facets, p.Facet)
-			p.Facet = &api.Facet{}
-			return p.Object, nil
-		}
+	if p.Levels.FoundScalarFacet(p.FacetPred, p.Facet) {
+		return p.Object, nil
 	}
-	for i := len(p.Quads) - 1; i >= 0; i-- {
-		if p.Quads[i].Predicate == p.FacetPred {
-			p.Quads[i].Facets = append(p.Quads[i].Facets, p.Facet)
-			p.Facet = &api.Facet{}
-			return p.Object, nil
-		}
-	}
+	p.foundScalarFacet()
 	return p.Object, nil
 }
 
@@ -501,4 +501,15 @@ func (p *Parser) getScalarValue(n byte) {
 	}
 	p.Quads = append(p.Quads, p.Quad)
 	p.Quad = NewQuad()
+}
+
+func (p *Parser) foundScalarFacet() bool {
+	for i := len(p.Quads) - 1; i >= 0; i-- {
+		if p.Quads[i].Predicate == p.FacetPred {
+			p.Quads[i].Facets = append(p.Quads[i].Facets, p.Facet)
+			p.Facet = &api.Facet{}
+			return true
+		}
+	}
+	return false
 }
