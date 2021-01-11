@@ -28,11 +28,82 @@ func NewQuad() *Quad {
 	return &Quad{Facets: make([]*api.Facet, 0)}
 }
 
-type Level struct {
+type ParserLevels struct {
+	Counter uint64
+	Levels  []*ParserLevel
+}
+
+type ParserLevel struct {
 	Array   bool
 	Subject string
 	Wait    *Quad
 	Scalars bool
+}
+
+func NewParserLevels() *ParserLevels {
+	return &ParserLevels{
+		Levels: make([]*ParserLevel, 0),
+	}
+}
+
+func (p *ParserLevels) Pop() *ParserLevel {
+	if len(p.Levels) == 0 {
+		return nil
+	}
+	l := p.Levels[len(p.Levels)-1]
+	p.Levels = p.Levels[:len(p.Levels)-1]
+	return l
+}
+
+func (p *ParserLevels) Get(n int) *ParserLevel {
+	if len(p.Levels) <= n {
+		return nil
+	}
+	return p.Levels[len(p.Levels)-1-n]
+}
+
+func (p *ParserLevels) InArray() bool {
+	if len(p.Levels) < 2 {
+		return false
+	}
+	return p.Levels[len(p.Levels)-2].Array
+}
+
+// Deeper is called when we encounter a '{' or '[' node and are going "deeper"
+// into the nested JSON objects. It's important to set the 'array' param to
+// true when we encounter '[' nodes because we only want to increment the
+// global Subject counter for objects.
+func (p *ParserLevels) Deeper(array bool) *ParserLevel {
+	var subject string
+	if !array {
+		p.Counter++
+		// TODO: use dgraph prefix and random number
+		subject = fmt.Sprintf("c.%d", p.Counter)
+	}
+	level := &ParserLevel{
+		Array:   array,
+		Subject: subject,
+	}
+	p.Levels = append(p.Levels, level)
+	return level
+}
+
+// Subject returns the current subject based on how deeply nested we are. We
+// iterate through the Levels in reverse order (it's a stack) to find a
+// non-array Level with a subject.
+func (p *ParserLevels) Subject() string {
+	for i := len(p.Levels) - 1; i >= 0; i-- {
+		if !p.Levels[i].Array {
+			return p.Levels[i].Subject
+		}
+	}
+	return ""
+}
+
+// FoundSubject is called when the Parser is in the Uid state and finds a valid
+// uid.
+func (p *ParserLevels) FoundSubject(s string) {
+	p.Levels[len(p.Levels)-1].Subject = s
 }
 
 type ParserState func(byte) (ParserState, error)
@@ -44,7 +115,7 @@ type Parser struct {
 	Quad           *Quad
 	Facet          *api.Facet
 	Quads          []*Quad
-	Levels         []*Level
+	Levels         *ParserLevels
 	Parsed         *json.ParsedJson
 	FacetPred      string
 	FacetId        int
@@ -55,7 +126,7 @@ func NewParser() *Parser {
 		Cursor: 1,
 		Quad:   NewQuad(),
 		Quads:  make([]*Quad, 0),
-		Levels: make([]*Level, 0),
+		Levels: NewParserLevels(),
 		Facet:  &api.Facet{},
 	}
 }
@@ -96,46 +167,15 @@ func (p *Parser) String() string {
 	return string(s)
 }
 
-// Deeper is called when we encounter a '{' or '[' node and are going "deeper"
-// into the nested JSON objects. It's important to set the 'array' param to
-// true when we encounter '[' nodes because we only want to increment the
-// global Subject counter for objects.
-func (p *Parser) Deeper(array bool) *Level {
-	var subject string
-	if !array {
-		p.SubjectCounter++
-		// TODO: use dgraph prefix and random number
-		subject = fmt.Sprintf("c.%d", p.SubjectCounter)
-	}
-	level := &Level{
-		Array:   array,
-		Subject: subject,
-	}
-	p.Levels = append(p.Levels, level)
-	return level
-}
-
-// Subject returns the current subject based on how deeply nested we are. We
-// iterate through the Levels in reverse order (it's a stack) to find a
-// non-array Level with a subject.
-func (p *Parser) Subject() string {
-	for i := len(p.Levels) - 1; i >= 0; i-- {
-		if !p.Levels[i].Array {
-			return p.Levels[i].Subject
-		}
-	}
-	return ""
-}
-
 // Root is the initial state of the Parser. It should only look for '{' or '['
 // nodes, anything else is bad JSON.
 func (p *Parser) Root(n byte) (ParserState, error) {
 	switch n {
 	case '{':
-		p.Deeper(false)
+		p.Levels.Deeper(false)
 		return p.Object, nil
 	case '[':
-		p.Deeper(true)
+		p.Levels.Deeper(true)
 		return p.Array, nil
 	}
 	return nil, nil
@@ -146,18 +186,20 @@ func (p *Parser) Root(n byte) (ParserState, error) {
 func (p *Parser) Object(n byte) (ParserState, error) {
 	switch n {
 	case '{':
-		p.Deeper(false)
+		p.Levels.Deeper(false)
 		return p.Object, nil
 	case '}':
-		l := p.Levels[len(p.Levels)-1]
+		l := p.Levels.Get(0)
+		// check if the current level has anything waiting to be pushed, if the
+		// current level is scalars we don't push anything
 		if l.Wait != nil && !l.Scalars {
 			p.Quad = l.Wait
 			p.Quad.ObjectId = l.Subject
 			p.Quads = append(p.Quads, p.Quad)
 			p.Quad = NewQuad()
 		} else {
-			if len(p.Levels) >= 2 {
-				a := p.Levels[len(p.Levels)-2]
+			if p.Levels.InArray() {
+				a := p.Levels.Get(1)
 				if a.Array && a.Wait != nil && !a.Scalars {
 					p.Quad.Subject = a.Wait.Subject
 					p.Quad.Predicate = a.Wait.Predicate
@@ -168,10 +210,10 @@ func (p *Parser) Object(n byte) (ParserState, error) {
 				}
 			}
 		}
-		p.Levels = p.Levels[:len(p.Levels)-1]
+		p.Levels.Pop()
 		return p.Object, nil
 	case ']':
-		p.Levels = p.Levels[:len(p.Levels)-1]
+		p.Levels.Pop()
 		return p.Object, nil
 	case '"':
 		s := p.String()
@@ -192,7 +234,7 @@ func (p *Parser) Object(n byte) (ParserState, error) {
 				return p.ScalarFacet, nil
 			}
 		} else {
-			p.Quad.Subject = p.Subject()
+			p.Quad.Subject = p.Levels.Subject()
 			p.Quad.Predicate = s
 			return p.Value, nil
 		}
@@ -210,9 +252,6 @@ func (p *Parser) MapFacet(n byte) (ParserState, error) {
 		}
 		p.FacetId = id
 		return p.MapFacetVal, nil
-	case '}':
-		// TODO: document why this is important
-		p.Facet = &api.Facet{}
 	}
 	return p.Object, nil
 }
@@ -230,11 +269,6 @@ func (p *Parser) MapFacetVal(n byte) (ParserState, error) {
 			p.Facet.ValType = api.Facet_DATETIME
 			facetVal = t
 		} else {
-			/*
-				p.Facet.ValType = api.Facet_STRING
-				facetVal = s
-			*/
-
 			if f, err = facets.FacetFor(p.Facet.Key, strconv.Quote(s)); err != nil {
 				return nil, err
 			}
@@ -346,9 +380,9 @@ func (p *Parser) ScalarFacet(n byte) (ParserState, error) {
 	p.Facet = f
 
 done:
-	for i := len(p.Levels) - 1; i >= 0; i-- {
-		if p.Levels[i].Wait != nil && p.Levels[i].Wait.Predicate == p.FacetPred {
-			p.Levels[i].Wait.Facets = append(p.Levels[i].Wait.Facets, p.Facet)
+	for i := len(p.Levels.Levels) - 1; i >= 0; i-- {
+		if p.Levels.Levels[i].Wait != nil && p.Levels.Levels[i].Wait.Predicate == p.FacetPred {
+			p.Levels.Levels[i].Wait.Facets = append(p.Levels.Levels[i].Wait.Facets, p.Facet)
 			p.Facet = &api.Facet{}
 			return p.Object, nil
 		}
@@ -364,19 +398,19 @@ done:
 }
 
 func (p *Parser) Array(n byte) (ParserState, error) {
-	l := p.Levels[len(p.Levels)-1]
+	l := p.Levels.Get(0)
 	if l.Wait != nil {
 		p.Quad.Subject = l.Wait.Subject
 		p.Quad.Predicate = l.Wait.Predicate
 	}
 	switch n {
 	case '{':
-		p.Deeper(false)
+		p.Levels.Deeper(false)
 		return p.Object, nil
 	case '}':
 		return p.Object, nil
 	case '[':
-		p.Deeper(false)
+		p.Levels.Deeper(false)
 		return p.Array, nil
 	case ']':
 		return p.Object, nil
@@ -417,7 +451,7 @@ func (p *Parser) Value(n byte) (ParserState, error) {
 			p.Cursor++
 			return p.Object, nil
 		}
-		l := p.Deeper(false)
+		l := p.Levels.Deeper(false)
 		l.Wait = p.Quad
 		p.Quad = NewQuad()
 		return p.Object, nil
@@ -426,7 +460,7 @@ func (p *Parser) Value(n byte) (ParserState, error) {
 			p.Cursor++
 			return p.Object, nil
 		}
-		l := p.Deeper(true)
+		l := p.Levels.Deeper(true)
 		l.Wait = p.Quad
 		p.Quad = NewQuad()
 		return p.Array, nil
@@ -457,6 +491,6 @@ func (p *Parser) Uid(n byte) (ParserState, error) {
 	if n != '"' {
 		return nil, errors.New("expected uid, instead found: " + p.String())
 	}
-	p.Levels[len(p.Levels)-1].Subject = p.String()
+	p.Levels.FoundSubject(p.String())
 	return p.Object, nil
 }
