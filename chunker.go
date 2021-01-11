@@ -1,743 +1,501 @@
 package chunker
 
 import (
-	"encoding/binary"
+	"errors"
 	"fmt"
 	"math"
+	"reflect"
+	"runtime"
+	"strconv"
 	"strings"
 
-	"github.com/dgraph-io/dgraph/tok"
+	"github.com/davecgh/go-spew/spew"
+	"github.com/dgraph-io/dgo/v2/protos/api"
 	"github.com/dgraph-io/dgraph/types"
+	"github.com/dgraph-io/dgraph/types/facets"
 	json "github.com/minio/simdjson-go"
 )
-
-type FacetType uint8
-
-const (
-	STRING FacetType = iota
-	INT
-	FLOAT
-	BOOL
-	DATETIME
-)
-
-func (t FacetType) String() string {
-	switch t {
-	case STRING:
-		return "STRING"
-	case INT:
-		return "INT"
-	case FLOAT:
-		return "FLOAT"
-	case BOOL:
-		return "BOOL"
-	case DATETIME:
-		return "DATETIME"
-	}
-	return "?"
-}
-
-type Facet struct {
-	Pred    string
-	Key     string
-	Value   []byte
-	ValType FacetType
-	Tokens  []string
-	//Alias   string
-}
 
 type Quad struct {
 	Subject   string
 	Predicate string
 	ObjectId  string
 	ObjectVal interface{}
-	Facets    []*Facet
+	Facets    []*api.Facet
 }
 
 func NewQuad() *Quad {
-	return &Quad{
-		Facets: make([]*Facet, 0),
+	return &Quad{Facets: make([]*api.Facet, 0)}
+}
+
+type ParserLevels struct {
+	Counter uint64
+	Levels  []*ParserLevel
+}
+
+type ParserLevel struct {
+	Array   bool
+	Subject string
+	Wait    *Quad
+	Scalars bool
+}
+
+func NewParserLevels() *ParserLevels {
+	return &ParserLevels{
+		Levels: make([]*ParserLevel, 0),
 	}
 }
 
-type ParserState uint8
-
-const (
-	NONE ParserState = iota
-	PREDICATE
-	SCALAR
-	OBJECT
-	ARRAY
-	ARRAY_SCALAR
-	FACET
-	FACET_SCALAR
-	FACET_MAP
-	FACET_ARRAY
-	UID
-	GEO
-)
-
-func (s ParserState) String() string {
-	switch s {
-	case NONE:
-		return "NONE"
-	case PREDICATE:
-		return "PREDICATE"
-	case SCALAR:
-		return "SCALAR"
-	case OBJECT:
-		return "OBJECT"
-	case ARRAY:
-		return "ARRAY"
-	case ARRAY_SCALAR:
-		return "ARRAY_SCALAR"
-	case FACET:
-		return "FACET"
-	case FACET_SCALAR:
-		return "FACET_SCALAR"
-	case FACET_ARRAY:
-		return "FACET_ARRAY"
-	case FACET_MAP:
-		return "FACET_MAP"
-	case UID:
-		return "UID"
-	case GEO:
-		return "GEO"
-	}
-	return "?"
-}
-
-type (
-	Queue struct {
-		Waiting []*QueueQuad
-	}
-	QueueQuad struct {
-		Type ParserState
-		Quad *Quad
-	}
-)
-
-func NewQueue() *Queue {
-	return &Queue{
-		Waiting: make([]*QueueQuad, 0),
-	}
-}
-
-func (q *Queue) Update(t ParserState) {
-	q.Waiting[len(q.Waiting)-1].Type = t
-}
-
-func (q *Queue) Recent(t ParserState) bool {
-	return q.Waiting[len(q.Waiting)-1].Type == t
-}
-
-func (q *Queue) Pop(t ParserState) *Quad {
-	waiting := q.Waiting[len(q.Waiting)-1]
-	if waiting.Type != t {
+func (p *ParserLevels) Pop() *ParserLevel {
+	if len(p.Levels) == 0 {
 		return nil
 	}
-	q.Waiting = q.Waiting[:len(q.Waiting)-1]
-	return waiting.Quad
+	l := p.Levels[len(p.Levels)-1]
+	p.Levels = p.Levels[:len(p.Levels)-1]
+	return l
 }
 
-func (q *Queue) Add(t ParserState, quad *Quad) {
-	q.Waiting = append(q.Waiting, &QueueQuad{
-		Type: t,
-		Quad: quad,
-	})
-}
-
-func (q *Queue) Empty() bool {
-	return len(q.Waiting) == 0
-}
-
-type (
-	Depth struct {
-		Counter uint64
-		Levels  []*DepthLevel
+func (p *ParserLevels) Get(n int) *ParserLevel {
+	if len(p.Levels) <= n {
+		return nil
 	}
-	DepthLevel struct {
-		Type   ParserState
-		Uids   []string
-		Vals   []interface{}
-		Uid    string
-		Closes uint64
-	}
-)
-
-func NewDepthLevel(t ParserState, counter, closes uint64) *DepthLevel {
-	return &DepthLevel{
-		Type:   t,
-		Uids:   make([]string, 0),
-		Vals:   make([]interface{}, 0),
-		Uid:    fmt.Sprintf("c.%d", counter),
-		Closes: closes,
-	}
+	return p.Levels[len(p.Levels)-1-n]
 }
 
-func (l *DepthLevel) Subject() string {
-	if len(l.Uids) == 0 {
-		return l.Uid
-	}
-	return l.Uids[len(l.Uids)-1]
-}
-
-func NewDepth() *Depth {
-	return &Depth{
-		Levels: make([]*DepthLevel, 0),
-	}
-}
-
-func (d *Depth) Closes() uint64 {
-	if len(d.Levels) < 1 {
-		return 0
-	}
-	return d.Levels[len(d.Levels)-1].Closes
-}
-
-func (d *Depth) ArrayObject() bool {
-	if len(d.Levels) < 2 {
+func (p *ParserLevels) InArray() bool {
+	if len(p.Levels) < 2 {
 		return false
 	}
-	return d.Levels[len(d.Levels)-2].Type == ARRAY
+	return p.Levels[len(p.Levels)-2].Array
 }
 
-func (d *Depth) ArrayVal(v interface{}) {
-	if len(d.Levels) < 1 {
-		return
+// Deeper is called when we encounter a '{' or '[' node and are going "deeper"
+// into the nested JSON objects. It's important to set the 'array' param to
+// true when we encounter '[' nodes because we only want to increment the
+// global Subject counter for objects.
+func (p *ParserLevels) Deeper(array bool) *ParserLevel {
+	var subject string
+	if !array {
+		p.Counter++
+		// TODO: use dgraph prefix and random number
+		subject = fmt.Sprintf("c.%d", p.Counter)
 	}
-	array := d.Levels[len(d.Levels)-1]
-	array.Vals = append(array.Vals, v)
-}
-
-func (d *Depth) ArrayUid(uid string) {
-	if len(d.Levels) < 2 {
-		return
+	level := &ParserLevel{
+		Array:   array,
+		Subject: subject,
 	}
-	array := d.Levels[len(d.Levels)-2]
-	array.Uids = append(array.Uids, uid)
+	p.Levels = append(p.Levels, level)
+	return level
 }
 
-func (d *Depth) Uid(uid string) {
-	curr := d.Levels[len(d.Levels)-1]
-	curr.Uids = append(curr.Uids, uid)
-}
-
-func (d *Depth) Subject() string {
-	return d.Levels[len(d.Levels)-1].Subject()
-}
-
-func (d *Depth) Increase(t ParserState, closes uint64) {
-	if t == OBJECT {
-		d.Counter++
+// Subject returns the current subject based on how deeply nested we are. We
+// iterate through the Levels in reverse order (it's a stack) to find a
+// non-array Level with a subject.
+func (p *ParserLevels) Subject() string {
+	for i := len(p.Levels) - 1; i >= 0; i-- {
+		if !p.Levels[i].Array {
+			return p.Levels[i].Subject
+		}
 	}
-	d.Levels = append(d.Levels, NewDepthLevel(t, d.Counter, closes))
+	return ""
 }
 
-func (d *Depth) Decrease(t ParserState) *DepthLevel {
-	top := d.Levels[len(d.Levels)-1]
-	d.Levels = d.Levels[:len(d.Levels)-1]
-	return top
+// FoundSubject is called when the Parser is in the Uid state and finds a valid
+// uid.
+func (p *ParserLevels) FoundSubject(s string) {
+	p.Levels[len(p.Levels)-1].Subject = s
 }
+
+type ParserState func(byte) (ParserState, error)
 
 type Parser struct {
-	State  ParserState
-	Parsed *json.ParsedJson
-	Quads  []*Quad
-	Facets []*Facet
-	Queue  *Queue
-	Depth  *Depth
-	Quad   *Quad
-	Facet  *Facet
-	Skip   bool
-	Logs   bool
-
-	stringOffset uint64
+	Cursor         uint64
+	StringCursor   uint64
+	SubjectCounter uint64
+	Quad           *Quad
+	Facet          *api.Facet
+	Quads          []*Quad
+	Levels         *ParserLevels
+	Parsed         *json.ParsedJson
+	FacetPred      string
+	FacetId        int
 }
 
-func NewParser(logs bool) *Parser {
+func NewParser() *Parser {
 	return &Parser{
-		State:  NONE,
-		Quads:  make([]*Quad, 0),
-		Facets: make([]*Facet, 0),
+		Cursor: 1,
 		Quad:   NewQuad(),
-		Facet:  &Facet{},
-		Queue:  NewQueue(),
-		Depth:  NewDepth(),
-		Logs:   logs,
+		Quads:  make([]*Quad, 0),
+		Levels: NewParserLevels(),
+		Facet:  &api.Facet{},
 	}
 }
 
-func (p *Parser) Parse(d []byte) ([]*Quad, error) {
-	var err error
+func (p *Parser) Run(d []byte) (err error) {
 	if p.Parsed, err = json.Parse(d, nil); err != nil {
-		return nil, err
+		return
 	}
-	return p.Quads, p.Walk()
-}
-
-func (p *Parser) String(l uint64) string {
-	s := string(p.Parsed.Strings[p.stringOffset : p.stringOffset+l])
-	p.stringOffset += l
-	return s
-}
-
-func (p *Parser) Log(i uint64, c uint64, n byte) {
-	if p.Logs {
-		switch byte(c >> 56) {
-		case 'r', 'n', 't', 'f', 'l', 'u', 'd', '"', '[', ']', '{', '}':
-			fmt.Printf("%2d: %c %c %s\n", i, byte(c>>56), n, p.State)
-		default:
+	for state := p.Root; state != nil; p.Cursor++ {
+		if p.Cursor >= uint64(len(p.Parsed.Tape)) {
+			return
 		}
-	}
-}
-
-func (p *Parser) LogMore(s string) {
-	if p.Logs {
-		fmt.Printf("\n        %s\n\n", s)
-	}
-}
-
-func (p *Parser) Walk() (err error) {
-	// n is a placeholder for the next node
-	n := byte('n')
-
-	for i := uint64(0); i < uint64(len(p.Parsed.Tape))-1; i++ {
-		// c is the current node on the tape
-		c := p.Parsed.Tape[i]
-
-		// skip over things like {} and []
-		if p.Skip {
-			p.Log(i, c, 0)
-			p.Skip = false
-			continue
+		//p.Log(state)
+		if state, err = state(byte(p.Parsed.Tape[p.Cursor] >> 56)); err != nil {
+			return
 		}
-
-		// switch over the current node type
-		switch byte(c >> 56) {
-
-		// string
-		case '"':
-			// p.String grabs the string value from the string buffer and
-			// increments p.stringOffset to account for the length
-			s := p.String(p.Parsed.Tape[i+1])
-
-			// n is the next node type
-			n = byte(p.Parsed.Tape[i+2] >> 56)
-
-			switch p.State {
-			case PREDICATE:
-				p.FoundPredicate(s)
-
-				// check if facet
-				var keys []string
-				if strings.Contains(s, "|") {
-					keys = strings.Split(s, "|")
-					if len(keys) == 2 {
-						p.State = FACET
-					}
-				}
-
-				switch n {
-				case '{':
-					if p.State == FACET {
-						p.State = FACET_MAP
-						p.Quad = NewQuad()
-						p.Facet.Pred = keys[0]
-						p.Facet.Key = keys[1]
-					} else {
-						p.State = OBJECT
-						p.FoundSubject(OBJECT, p.Depth.Subject())
-					}
-				case '[':
-					p.State = ARRAY
-					p.FoundSubject(ARRAY, p.Depth.Subject())
-				default:
-					switch p.Quad.Predicate {
-					case "uid":
-						p.State = UID
-					case "type":
-						p.State = GEO
-					default:
-						if p.State == FACET {
-							p.State = FACET_SCALAR
-							p.Quad = NewQuad()
-							p.Facet.Pred = keys[0]
-							p.Facet.Key = keys[1]
-						} else {
-							p.State = SCALAR
-						}
-					}
-				}
-
-			case SCALAR:
-				p.State = PREDICATE
-				p.FoundValue(s)
-
-			case ARRAY_SCALAR:
-				p.State = ARRAY_SCALAR
-				p.FoundArrayVal(s)
-
-			case UID:
-				p.State = PREDICATE
-				p.FoundUid(s)
-
-			case GEO:
-				switch s {
-				case "Point", "MultiPoint":
-					fallthrough
-				case "LineString", "MultiLineString":
-					fallthrough
-				case "Polygon", "MultiPolygon":
-					fallthrough
-				case "GeometryCollection":
-					// TODO: parsing geojson is hard so right now we skip over
-					//       the object
-					i = p.Depth.Closes()
-					p.LogMore(fmt.Sprintf("skipping %s geo object", s))
-					p.State = PREDICATE
-				}
-
-			case FACET_SCALAR:
-				p.State = PREDICATE
-				err = p.FoundFacet(s)
-				if err != nil {
-					return err
-				}
-
-			case FACET_MAP:
-				p.LogMore(s)
-			}
-
-		// array open
-		case '[':
-			n = byte(p.Parsed.Tape[i+1] >> 56)
-			if n != ']' {
-				p.Depth.Increase(ARRAY, (c<<8)>>8-1)
-			}
-
-			p.LogMore(fmt.Sprintf("closing [ at %d", (c<<8)>>8-1))
-
-			switch n {
-			case '[':
-				p.State = ARRAY
-			case ']':
-				p.Queue.Pop(ARRAY)
-				p.State = PREDICATE
-				p.Skip = true
-			case '{':
-				p.State = OBJECT
-			default:
-				p.State = ARRAY_SCALAR
-				p.Queue.Update(ARRAY_SCALAR)
-			}
-
-		// array close
-		case ']':
-			n = byte(p.Parsed.Tape[i+1] >> 56)
-
-			if !p.Queue.Empty() {
-				if waiting := p.Queue.Pop(ARRAY_SCALAR); waiting != nil {
-					vals := p.Depth.Decrease(ARRAY_SCALAR).Vals
-					for _, val := range vals {
-						p.Quads = append(p.Quads, &Quad{
-							Subject:   p.Depth.Subject(),
-							Predicate: waiting.Predicate,
-							ObjectVal: val,
-							Facets:    make([]*Facet, 0),
-						})
-					}
-				}
-			}
-			if !p.Queue.Empty() {
-				if waiting := p.Queue.Pop(ARRAY); waiting != nil {
-					uids := p.Depth.Decrease(ARRAY).Uids
-					for _, uid := range uids {
-						p.Quads = append(p.Quads, &Quad{
-							Subject:   p.Depth.Subject(),
-							Predicate: waiting.Predicate,
-							ObjectId:  uid,
-							// we need this incase we find a facet for this
-							// predicate later in the file, then we can append
-							Facets: make([]*Facet, 0),
-						})
-					}
-				}
-			}
-
-			switch n {
-			case '[':
-				p.State = ARRAY
-			case '{':
-				p.State = OBJECT
-			case '"', '}':
-				p.State = PREDICATE
-			}
-
-		// object open
-		case '{':
-			n = byte(p.Parsed.Tape[i+1] >> 56)
-			if n != '}' {
-				p.Depth.Increase(OBJECT, (c<<8)>>8-1)
-			}
-
-			p.LogMore(fmt.Sprintf("closing { at %d", (c<<8)>>8-1))
-
-			switch n {
-			case '{':
-				p.State = OBJECT
-			case '}':
-				p.State = PREDICATE
-				p.Queue.Pop(OBJECT)
-				p.Skip = true
-			case '[':
-				p.State = ARRAY
-			case '"':
-				switch p.State {
-				case FACET_MAP:
-					p.State = FACET_MAP
-				default:
-					p.State = PREDICATE
-				}
-			}
-
-		// object close
-		case '}':
-			n = byte(p.Parsed.Tape[i+1] >> 56)
-			if p.Depth.ArrayObject() {
-				p.Depth.ArrayUid(p.Depth.Subject())
-			}
-			objectId := p.Depth.Decrease(OBJECT).Subject()
-			if !p.Queue.Empty() {
-				if waiting := p.Queue.Pop(OBJECT); waiting != nil {
-					p.Quads = append(p.Quads, &Quad{
-						Subject:   p.Depth.Subject(),
-						Predicate: waiting.Predicate,
-						ObjectId:  objectId,
-						// we need this incase we find a facet for this
-						// predicate later in the file, then we can append
-						Facets: make([]*Facet, 0),
-					})
-				}
-			}
-
-			switch n {
-			case '{':
-				p.State = OBJECT
-			case '"', '}', ']':
-				p.State = PREDICATE
-			}
-
-		// root
-		case 'r':
-			n = byte(p.Parsed.Tape[i+1] >> 56)
-
-			switch n {
-			case '{':
-				p.State = OBJECT
-			case '[':
-				p.State = ARRAY
-			}
-
-		// null
-		case 'n':
-			n = byte(p.Parsed.Tape[i+1] >> 56)
-
-		// true
-		case 't':
-			n = byte(p.Parsed.Tape[i+1] >> 56)
-
-			switch p.State {
-			case SCALAR:
-				p.State = PREDICATE
-				p.FoundValue(true)
-			case ARRAY_SCALAR:
-				p.State = ARRAY_SCALAR
-				p.FoundArrayVal(true)
-			case FACET_SCALAR:
-				p.State = PREDICATE
-				err = p.FoundFacet(true)
-				if err != nil {
-					return err
-				}
-			}
-
-		// false
-		case 'f':
-			n = byte(p.Parsed.Tape[i+1] >> 56)
-
-			switch p.State {
-			case SCALAR:
-				p.State = PREDICATE
-				p.FoundValue(false)
-			case ARRAY_SCALAR:
-				// TODO: don't need to re-set p.State
-				p.State = ARRAY_SCALAR
-				p.FoundArrayVal(false)
-			case FACET_SCALAR:
-				p.State = PREDICATE
-				err = p.FoundFacet(false)
-				if err != nil {
-					return err
-				}
-			}
-
-		// int64
-		case 'l':
-			n = byte(p.Parsed.Tape[i+2] >> 56)
-
-			switch p.State {
-			case SCALAR:
-				p.State = PREDICATE
-				// int64 value is stored after the current node (i + 1)
-				p.FoundValue(int64(p.Parsed.Tape[i+1]))
-			case ARRAY_SCALAR:
-				p.State = ARRAY_SCALAR
-				p.FoundArrayVal(int64(p.Parsed.Tape[i+1]))
-			case FACET_SCALAR:
-				p.State = PREDICATE
-				err = p.FoundFacet(p.Parsed.Tape[i+1])
-				if err != nil {
-					return err
-				}
-			}
-
-		// uint64
-		case 'u':
-			n = byte(p.Parsed.Tape[i+2] >> 56)
-
-			switch p.State {
-			case SCALAR:
-				p.State = PREDICATE
-				// uint64 value is stored after the current node (i + 1)
-				p.FoundValue(p.Parsed.Tape[i+1])
-			case ARRAY_SCALAR:
-				p.State = ARRAY_SCALAR
-				p.FoundArrayVal(p.Parsed.Tape[i+1])
-			case FACET_SCALAR:
-				p.State = PREDICATE
-				err = p.FoundFacet(p.Parsed.Tape[i+1])
-				if err != nil {
-					return err
-				}
-			}
-
-		// float64
-		case 'd':
-			n = byte(p.Parsed.Tape[i+2] >> 56)
-
-			switch p.State {
-			case SCALAR:
-				p.State = PREDICATE
-				p.LogMore(fmt.Sprintf("found float %d", p.Parsed.Tape[i+1]))
-				// float64 value is stored after the current node (i + 1)
-				p.FoundValue(math.Float64frombits(p.Parsed.Tape[i+1]))
-			case ARRAY_SCALAR:
-				p.State = ARRAY_SCALAR
-				p.FoundArrayVal(math.Float64frombits(p.Parsed.Tape[i+1]))
-			case FACET_SCALAR:
-				p.State = PREDICATE
-				err = p.FoundFacet(math.Float64frombits(p.Parsed.Tape[i+1]))
-				if err != nil {
-					return err
-				}
-			}
-		}
-
-		p.Log(i, c, n)
 	}
 	return
 }
 
-func (p *Parser) FoundArrayVal(v interface{}) {
-	p.Depth.ArrayVal(v)
+func (p *Parser) Log(state ParserState) {
+	line := runtime.FuncForPC(reflect.ValueOf(state).Pointer()).Name()
+	name := strings.Split(strings.Split(line, ".")[3], "-")
+	fmt.Printf("-> %c - %v\n%v\n",
+		p.Parsed.Tape[p.Cursor]>>56, name[0], spew.Sdump(p.Levels))
 }
 
-func (p *Parser) FoundUid(s string) {
-	p.Depth.Uid(s)
-	p.Quad = NewQuad()
+// String is called when we encounter a '"' (string) node and want to get the
+// value from the string buffer. In the simdjson Tape, the string length is
+// immediately after the '"' node, so we first have to increment the Cursor
+// by one and then we use the Tape value as the string length, and create
+// a byte slice from the string buffer.
+func (p *Parser) String() string {
+	p.Cursor++
+	length := p.Parsed.Tape[p.Cursor]
+	s := p.Parsed.Strings[p.StringCursor : p.StringCursor+length]
+	p.StringCursor += length
+	return string(s)
 }
 
-func (p *Parser) FoundSubject(t ParserState, s string) {
-	p.Queue.Add(t, p.Quad)
-	p.Quad = NewQuad()
+// Root is the initial state of the Parser. It should only look for '{' or '['
+// nodes, anything else is bad JSON.
+func (p *Parser) Root(n byte) (ParserState, error) {
+	switch n {
+	case '{':
+		p.Levels.Deeper(false)
+		return p.Object, nil
+	case '[':
+		p.Levels.Deeper(true)
+		return p.Array, nil
+	}
+	return nil, nil
 }
 
-func (p *Parser) FoundPredicate(s string) {
-	p.Quad.Predicate = s
+// Object is the most common state for the Parser to be in--we're usually in an
+// object of some kind.
+func (p *Parser) Object(n byte) (ParserState, error) {
+	switch n {
+	case '{':
+		p.Levels.Deeper(false)
+		return p.Object, nil
+	case '}':
+		l := p.Levels.Get(0)
+		// check if the current level has anything waiting to be pushed, if the
+		// current level is scalars we don't push anything
+		if l.Wait != nil && !l.Scalars {
+			p.Quad = l.Wait
+			p.Quad.ObjectId = l.Subject
+			p.Quads = append(p.Quads, p.Quad)
+			p.Quad = NewQuad()
+		} else {
+			if p.Levels.InArray() {
+				a := p.Levels.Get(1)
+				if a.Array && a.Wait != nil && !a.Scalars {
+					p.Quad.Subject = a.Wait.Subject
+					p.Quad.Predicate = a.Wait.Predicate
+					p.Quad.ObjectId = l.Subject
+					p.Quad.Facets = a.Wait.Facets
+					p.Quads = append(p.Quads, p.Quad)
+					p.Quad = NewQuad()
+				}
+			}
+		}
+		p.Levels.Pop()
+		return p.Object, nil
+	case ']':
+		p.Levels.Pop()
+		return p.Object, nil
+	case '"':
+		s := p.String()
+		if s == "uid" {
+			return p.Uid, nil
+		}
+		// check if this is a facet definition
+		if strings.Contains(s, "|") {
+			e := strings.Split(s, "|")
+			if len(e) == 2 {
+				p.FacetPred = e[0]
+				p.Facet.Key = e[1]
+				// peek at the next node to see if it's a scalar facet or map
+				next := byte(p.Parsed.Tape[p.Cursor+1] >> 56)
+				if next == '{' {
+					// go into the object so MapFacet can immediately check the
+					// keys
+					p.Cursor++
+					return p.MapFacet, nil
+				}
+				return p.ScalarFacet, nil
+			}
+		} else {
+			// found a normal nquad
+			p.Quad.Subject = p.Levels.Subject()
+			p.Quad.Predicate = s
+			return p.Value, nil
+		}
+		// not sure what this string is, try again
+		return p.Object, nil
+	}
+	return nil, nil
 }
 
-func (p *Parser) FoundValue(v interface{}) {
-	p.Quad.Subject = p.Depth.Subject()
-	p.Quad.ObjectVal = v
+func (p *Parser) MapFacet(n byte) (ParserState, error) {
+	// map facet keys must be (numerical) strings
+	if n != '"' {
+		return p.Object, nil
+	}
+	id, err := strconv.Atoi(p.String())
+	if err != nil {
+		return nil, err
+	}
+	p.FacetId = id
+	return p.MapFacetVal, nil
+}
+
+func (p *Parser) MapFacetVal(n byte) (ParserState, error) {
+	var f *api.Facet
+	var err error
+	var facetVal interface{}
+
+	switch n {
+	case '"':
+		s := p.String()
+		t, err := types.ParseTime(s)
+		if err == nil {
+			p.Facet.ValType = api.Facet_DATETIME
+			facetVal = t
+		} else {
+			if f, err = facets.FacetFor(p.Facet.Key, strconv.Quote(s)); err != nil {
+				return nil, err
+			}
+			p.Facet = f
+			goto done
+		}
+	case 'u':
+		// NOTE: dgraph doesn't have uint64 facet type, so we just convert it to
+		//       int64
+		fallthrough
+	case 'l':
+		p.Facet.ValType = api.Facet_INT
+		p.Cursor++
+		facetVal = int64(p.Parsed.Tape[p.Cursor])
+	case 'd':
+		p.Facet.ValType = api.Facet_FLOAT
+		p.Cursor++
+		facetVal = math.Float64frombits(p.Parsed.Tape[p.Cursor])
+	case 't':
+		p.Facet.ValType = api.Facet_BOOL
+		facetVal = true
+	case 'f':
+		p.Facet.ValType = api.Facet_BOOL
+		facetVal = false
+	case 'n':
+		// TODO: can facets have null value?
+		return p.MapFacet, nil
+	}
+
+	if f, err = facets.ToBinary(p.Facet.Key, facetVal, p.Facet.ValType); err != nil {
+		return nil, err
+	}
+	p.Facet = f
+
+done:
+	// TODO: move this to a cache so we only have to grab referenced quads once
+	//       per facet map definition, rather than for each index-value
+	//
+	// find every quad that could be referenced by the facet
+	quads := make([]*Quad, 0)
+	for i := len(p.Quads) - 1; i >= 0; i-- {
+		if p.Quads[i].Predicate == p.FacetPred {
+			quads = append(quads, p.Quads[i])
+			/*
+				// TODO: if we want to only allow map facet definitions directly
+				//       under the quad definition, uncomment this
+				} else {
+					break
+			*/
+		}
+	}
+	for i := len(quads) - 1; i >= 0; i-- {
+		if i == len(quads)-1-p.FacetId {
+			quads[i].Facets = append(quads[i].Facets, p.Facet)
+			// make new facet
+			facetKey := p.Facet.Key
+			p.Facet = &api.Facet{Key: facetKey}
+			return p.MapFacet, nil
+		}
+	}
+	return p.MapFacet, nil
+}
+
+func (p *Parser) ScalarFacet(n byte) (ParserState, error) {
+	var f *api.Facet
+	var err error
+	var facetVal interface{}
+
+	switch n {
+	case '"':
+		s := p.String()
+		t, err := types.ParseTime(s)
+		if err == nil {
+			p.Facet.ValType = api.Facet_DATETIME
+			facetVal = t
+		} else {
+			if f, err = facets.FacetFor(p.Facet.Key, strconv.Quote(s)); err != nil {
+				return nil, err
+			}
+			p.Facet = f
+			goto done
+		}
+	case 'u':
+		// NOTE: dgraph doesn't have uint64 facet type, so we just convert it to
+		//       int64
+		fallthrough
+	case 'l':
+		p.Facet.ValType = api.Facet_INT
+		p.Cursor++
+		facetVal = int64(p.Parsed.Tape[p.Cursor])
+	case 'd':
+		p.Facet.ValType = api.Facet_FLOAT
+		p.Cursor++
+		facetVal = math.Float64frombits(p.Parsed.Tape[p.Cursor])
+	case 't':
+		p.Facet.ValType = api.Facet_BOOL
+		facetVal = true
+	case 'f':
+		p.Facet.ValType = api.Facet_BOOL
+		facetVal = false
+	case 'n':
+		// TODO: can facets have null value?
+		return p.MapFacet, nil
+	}
+
+	if f, err = facets.ToBinary(p.Facet.Key, facetVal, p.Facet.ValType); err != nil {
+		return nil, err
+	}
+	p.Facet = f
+
+done:
+	for i := len(p.Levels.Levels) - 1; i >= 0; i-- {
+		if p.Levels.Levels[i].Wait != nil && p.Levels.Levels[i].Wait.Predicate == p.FacetPred {
+			p.Levels.Levels[i].Wait.Facets = append(p.Levels.Levels[i].Wait.Facets, p.Facet)
+			p.Facet = &api.Facet{}
+			return p.Object, nil
+		}
+	}
+	for i := len(p.Quads) - 1; i >= 0; i-- {
+		if p.Quads[i].Predicate == p.FacetPred {
+			p.Quads[i].Facets = append(p.Quads[i].Facets, p.Facet)
+			p.Facet = &api.Facet{}
+			return p.Object, nil
+		}
+	}
+	return p.Object, nil
+}
+
+func (p *Parser) Array(n byte) (ParserState, error) {
+	l := p.Levels.Get(0)
+	if l.Wait != nil {
+		p.Quad.Subject = l.Wait.Subject
+		p.Quad.Predicate = l.Wait.Predicate
+	}
+	switch n {
+	case '{':
+		p.Levels.Deeper(false)
+		return p.Object, nil
+	case '}':
+		return p.Object, nil
+	case '[':
+		p.Levels.Deeper(false)
+		return p.Array, nil
+	case ']':
+		return p.Object, nil
+	case '"':
+		l.Scalars = true
+		p.Quad.ObjectVal = p.String()
+	case 'l':
+		l.Scalars = true
+		p.Cursor++
+		p.Quad.ObjectVal = int64(p.Parsed.Tape[p.Cursor])
+	case 'u':
+		l.Scalars = true
+		p.Cursor++
+		p.Quad.ObjectVal = p.Parsed.Tape[p.Cursor]
+	case 'd':
+		l.Scalars = true
+		p.Cursor++
+		p.Quad.ObjectVal = math.Float64frombits(p.Parsed.Tape[p.Cursor])
+	case 't':
+		l.Scalars = true
+		p.Quad.ObjectVal = true
+	case 'f':
+		l.Scalars = true
+		p.Quad.ObjectVal = false
+	case 'n':
+		l.Scalars = true
+		p.Quad.ObjectVal = nil
+	}
 	p.Quads = append(p.Quads, p.Quad)
 	p.Quad = NewQuad()
+	return p.Array, nil
 }
 
-func (p *Parser) FoundFacetId(s string) {
+func (p *Parser) Value(n byte) (ParserState, error) {
+	switch n {
+	case '{':
+		if byte(p.Parsed.Tape[p.Cursor+1]>>56) == '}' {
+			p.Cursor++
+			return p.Object, nil
+		}
+		l := p.Levels.Deeper(false)
+		l.Wait = p.Quad
+		p.Quad = NewQuad()
+		return p.Object, nil
+	case '[':
+		if byte(p.Parsed.Tape[p.Cursor+1]>>56) == ']' {
+			p.Cursor++
+			return p.Object, nil
+		}
+		l := p.Levels.Deeper(true)
+		l.Wait = p.Quad
+		p.Quad = NewQuad()
+		return p.Array, nil
+	case '"':
+		p.Quad.ObjectVal = p.String()
+	case 'l':
+		p.Cursor++
+		p.Quad.ObjectVal = int64(p.Parsed.Tape[p.Cursor])
+	case 'u':
+		p.Cursor++
+		p.Quad.ObjectVal = p.Parsed.Tape[p.Cursor]
+	case 'd':
+		p.Cursor++
+		p.Quad.ObjectVal = math.Float64frombits(p.Parsed.Tape[p.Cursor])
+	case 't':
+		p.Quad.ObjectVal = true
+	case 'f':
+		p.Quad.ObjectVal = false
+	case 'n':
+		p.Quad.ObjectVal = nil
+	}
+	p.Quads = append(p.Quads, p.Quad)
+	p.Quad = NewQuad()
+	return p.Object, nil
 }
 
-func (p *Parser) FoundFacet(v interface{}) error {
-	switch val := v.(type) {
-	case string:
-		if t, err := types.ParseTime(val); err == nil {
-			p.Facet.ValType = DATETIME
-			b, err := t.MarshalBinary()
-			if err != nil {
-				return err
-			}
-			p.Facet.Value = b
-		} else {
-			p.Facet.ValType = STRING
-			p.Facet.Value = []byte(val)
-			t, err := tok.GetTermTokens([]string{val})
-			if err != nil {
-				return err
-			}
-			p.Facet.Tokens = t
-		}
-	case int64:
-		p.Facet.ValType = INT
-		p.Facet.Value = []byte{
-			byte(0xff & val),
-			byte(0xff & (val >> 8)),
-			byte(0xff & (val >> 16)),
-			byte(0xff & (val >> 24)),
-			byte(0xff & (val >> 32)),
-			byte(0xff & (val >> 40)),
-			byte(0xff & (val >> 48)),
-			byte(0xff & (val >> 56))}
-	case uint64:
-		p.Facet.ValType = INT
-		p.Facet.Value = make([]byte, 8)
-		binary.LittleEndian.PutUint64(p.Facet.Value, val)
-	case float64:
-		p.Facet.ValType = FLOAT
-		n := math.Float64bits(val)
-		p.Facet.Value = []byte{
-			byte(0xff & n),
-			byte(0xff & (n >> 8)),
-			byte(0xff & (n >> 16)),
-			byte(0xff & (n >> 24)),
-			byte(0xff & (n >> 32)),
-			byte(0xff & (n >> 40)),
-			byte(0xff & (n >> 48)),
-			byte(0xff & (n >> 56))}
-	case bool:
-		p.Facet.ValType = BOOL
-		if val {
-			p.Facet.Value = []byte{0x01}
-		} else {
-			p.Facet.Value = []byte{0x00}
-		}
+func (p *Parser) Uid(n byte) (ParserState, error) {
+	if n != '"' {
+		return nil, errors.New("expected uid, instead found: " + p.String())
 	}
-	// search quads in reverse order for the facet predicate
-	for i := len(p.Quads) - 1; i > 0; i-- {
-		if p.Quads[i].Predicate == p.Facet.Pred {
-			p.Quads[i].Facets = append(p.Quads[i].Facets, p.Facet)
-			p.Facet = &Facet{}
-			break
-		}
-	}
-	return nil
+	p.Levels.FoundSubject(p.String())
+	return p.Object, nil
 }
