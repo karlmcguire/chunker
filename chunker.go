@@ -11,6 +11,8 @@ import (
 	"github.com/dgraph-io/dgraph/types"
 	"github.com/dgraph-io/dgraph/types/facets"
 	json "github.com/minio/simdjson-go"
+	"github.com/twpayne/go-geom"
+	"github.com/twpayne/go-geom/encoding/geojson"
 )
 
 type Quad struct {
@@ -351,42 +353,13 @@ func (p *Parser) Array(n byte) (ParserState, error) {
 	return p.Array, nil
 }
 
-func (p *Parser) isGeo(n byte) bool {
-	if uint64(len(p.Parsed.Tape))-p.Cursor < 3 {
-		return false
-	}
-	if byte(p.Parsed.Tape[p.Cursor+1]>>56) != '"' {
-		return false
-	}
-	if byte(p.Parsed.Tape[p.Cursor+3]>>56) != '"' {
-		return false
-	}
-	p.Cursor++
-	maybeGeoType := p.String()
-	if maybeGeoType != "type" {
-		p.Cursor -= 2
-		p.StringCursor -= uint64(len(maybeGeoType))
-		return false
-	}
-	p.Cursor++
-	maybeGeoType = p.String()
-	switch maybeGeoType {
-	case "Point", "MultiPoint":
-	case "LineString", "MultiLineString":
-	case "Polygon", "MultiPolygon":
-	case "GeometryCollection":
-	default:
-		p.Cursor -= 2
-		p.StringCursor -= uint64(len(maybeGeoType))
-		return false
-	}
-	return true
-}
-
 func (p *Parser) Value(n byte) (ParserState, error) {
 	switch n {
 	case '{':
-		if p.isGeo(n) {
+		if p.isGeo() {
+			if err := p.getGeoValue(); err != nil {
+				return nil, err
+			}
 		}
 		return p.openValueLevel('}', false, p.Object), nil
 	case '[':
@@ -503,4 +476,59 @@ func (p *Parser) getFacetValue(n byte) interface{} {
 	case 'n':
 	}
 	return val
+}
+
+func (p *Parser) isGeo() bool {
+	if uint64(len(p.Parsed.Tape))-p.Cursor < 3 {
+		return false
+	}
+	if byte(p.Parsed.Tape[p.Cursor+1]>>56) != '"' {
+		return false
+	}
+	if byte(p.Parsed.Tape[p.Cursor+3]>>56) != '"' {
+		return false
+	}
+	p.Cursor++
+	maybeGeoType := p.String()
+	if maybeGeoType != "type" {
+		p.Cursor -= 2
+		p.StringCursor -= uint64(len(maybeGeoType))
+		return false
+	}
+	p.Cursor++
+	maybeGeoType = p.String()
+	switch maybeGeoType {
+	case "Point", "MultiPoint":
+	case "LineString", "MultiLineString":
+	case "Polygon", "MultiPolygon":
+	case "GeometryCollection":
+	default:
+		p.Cursor -= 2
+		p.StringCursor -= uint64(len(maybeGeoType))
+		return false
+	}
+	p.Cursor -= 4
+	return true
+}
+
+func (p *Parser) getGeoValue() error {
+	var geoIter json.Iter
+	if _, err := p.Iter.AdvanceIter(&geoIter); err != nil {
+		return err
+	}
+	object, err := geoIter.MarshalJSON()
+	if err != nil {
+		return err
+	}
+	var geoStruct geom.T
+	if err = geojson.Unmarshal(object, &geoStruct); err != nil {
+		return err
+	}
+	var geoVal *api.Value
+	if geoVal, err = types.ObjectValue(types.GeoID, geoStruct); err != nil {
+		return err
+	}
+	// TODO: move everything over to *api.NQuad so we can use this *api.Value
+	_ = geoVal
+	return nil
 }
