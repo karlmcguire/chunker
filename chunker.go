@@ -269,6 +269,7 @@ func (p *Parser) MapFacet(n byte) (ParserState, error) {
 }
 
 func (p *Parser) MapFacetVal(n byte) (ParserState, error) {
+	// getFacet fills the p.Facet struct
 	if err := p.getFacet(n); err != nil {
 		return nil, err
 	}
@@ -285,9 +286,7 @@ func (p *Parser) MapFacetVal(n byte) (ParserState, error) {
 	for i := len(quads) - 1; i >= 0; i-- {
 		if i == len(quads)-1-p.FacetId {
 			quads[i].Facets = append(quads[i].Facets, p.Facet)
-			// make new facet
-			facetKey := p.Facet.Key
-			p.Facet = &api.Facet{Key: facetKey}
+			p.Facet = &api.Facet{}
 			return p.MapFacet, nil
 		}
 	}
