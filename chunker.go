@@ -27,94 +27,6 @@ func NewQuad() *Quad {
 	return &Quad{Facets: make([]*api.Facet, 0)}
 }
 
-type ParserLevels struct {
-	Counter uint64
-	Levels  []*ParserLevel
-}
-
-type ParserLevel struct {
-	Array   bool
-	Subject string
-	Wait    *Quad
-	Scalars bool
-}
-
-func NewParserLevels() *ParserLevels {
-	return &ParserLevels{
-		Levels: make([]*ParserLevel, 0),
-	}
-}
-
-func (p *ParserLevels) FoundScalarFacet(predicate string, facet *api.Facet) bool {
-	for i := len(p.Levels) - 1; i >= 0; i-- {
-		if p.Levels[i].Wait != nil && p.Levels[i].Wait.Predicate == predicate {
-			p.Levels[i].Wait.Facets = append(p.Levels[i].Wait.Facets, facet)
-			return true
-		}
-	}
-	return false
-}
-
-func (p *ParserLevels) Pop() *ParserLevel {
-	if len(p.Levels) == 0 {
-		return nil
-	}
-	l := p.Levels[len(p.Levels)-1]
-	p.Levels = p.Levels[:len(p.Levels)-1]
-	return l
-}
-
-func (p *ParserLevels) Get(n int) *ParserLevel {
-	if len(p.Levels) <= n {
-		return nil
-	}
-	return p.Levels[len(p.Levels)-1-n]
-}
-
-func (p *ParserLevels) InArray() bool {
-	if len(p.Levels) < 2 {
-		return false
-	}
-	return p.Levels[len(p.Levels)-2].Array
-}
-
-// Deeper is called when we encounter a '{' or '[' node and are going "deeper"
-// into the nested JSON objects. It's important to set the 'array' param to
-// true when we encounter '[' nodes because we only want to increment the
-// global Subject counter for objects.
-func (p *ParserLevels) Deeper(array bool) *ParserLevel {
-	var subject string
-	if !array {
-		p.Counter++
-		// TODO: use dgraph prefix and random number
-		subject = fmt.Sprintf("c.%d", p.Counter)
-	}
-	level := &ParserLevel{
-		Array:   array,
-		Subject: subject,
-	}
-	p.Levels = append(p.Levels, level)
-	return level
-}
-
-// Subject returns the current subject based on how deeply nested we are. We
-// iterate through the Levels in reverse order (it's a stack) to find a
-// non-array Level with a subject.
-func (p *ParserLevels) Subject() string {
-	for i := len(p.Levels) - 1; i >= 0; i-- {
-		if !p.Levels[i].Array {
-			return p.Levels[i].Subject
-		}
-	}
-	return ""
-}
-
-// FoundSubject is called when the Parser is in the Uid state and finds a valid
-// uid.
-func (p *ParserLevels) FoundSubject(s string) {
-	p.Levels[len(p.Levels)-1].Subject = s
-}
-
 type ParserState func(byte) (ParserState, error)
 
 type Parser struct {
@@ -554,4 +466,92 @@ func (p *Parser) getGeoValue() error {
 	// TODO: move everything over to *api.NQuad so we can use this *api.Value
 	_ = geoVal
 	return nil
+}
+
+type ParserLevels struct {
+	Counter uint64
+	Levels  []*ParserLevel
+}
+
+type ParserLevel struct {
+	Array   bool
+	Subject string
+	Wait    *Quad
+	Scalars bool
+}
+
+func NewParserLevels() *ParserLevels {
+	return &ParserLevels{
+		Levels: make([]*ParserLevel, 0),
+	}
+}
+
+func (p *ParserLevels) FoundScalarFacet(predicate string, facet *api.Facet) bool {
+	for i := len(p.Levels) - 1; i >= 0; i-- {
+		if p.Levels[i].Wait != nil && p.Levels[i].Wait.Predicate == predicate {
+			p.Levels[i].Wait.Facets = append(p.Levels[i].Wait.Facets, facet)
+			return true
+		}
+	}
+	return false
+}
+
+func (p *ParserLevels) Pop() *ParserLevel {
+	if len(p.Levels) == 0 {
+		return nil
+	}
+	l := p.Levels[len(p.Levels)-1]
+	p.Levels = p.Levels[:len(p.Levels)-1]
+	return l
+}
+
+func (p *ParserLevels) Get(n int) *ParserLevel {
+	if len(p.Levels) <= n {
+		return nil
+	}
+	return p.Levels[len(p.Levels)-1-n]
+}
+
+func (p *ParserLevels) InArray() bool {
+	if len(p.Levels) < 2 {
+		return false
+	}
+	return p.Levels[len(p.Levels)-2].Array
+}
+
+// Deeper is called when we encounter a '{' or '[' node and are going "deeper"
+// into the nested JSON objects. It's important to set the 'array' param to
+// true when we encounter '[' nodes because we only want to increment the
+// global Subject counter for objects.
+func (p *ParserLevels) Deeper(array bool) *ParserLevel {
+	var subject string
+	if !array {
+		p.Counter++
+		// TODO: use dgraph prefix and random number
+		subject = fmt.Sprintf("c.%d", p.Counter)
+	}
+	level := &ParserLevel{
+		Array:   array,
+		Subject: subject,
+	}
+	p.Levels = append(p.Levels, level)
+	return level
+}
+
+// Subject returns the current subject based on how deeply nested we are. We
+// iterate through the Levels in reverse order (it's a stack) to find a
+// non-array Level with a subject.
+func (p *ParserLevels) Subject() string {
+	for i := len(p.Levels) - 1; i >= 0; i-- {
+		if !p.Levels[i].Array {
+			return p.Levels[i].Subject
+		}
+	}
+	return ""
+}
+
+// FoundSubject is called when the Parser is in the Uid state and finds a valid
+// uid.
+func (p *ParserLevels) FoundSubject(s string) {
+	p.Levels[len(p.Levels)-1].Subject = s
 }
