@@ -127,8 +127,7 @@ type Parser struct {
 	Parsed       *json.ParsedJson
 	FacetPred    string
 	FacetId      int
-
-	Iter json.Iter
+	Iter         json.Iter
 }
 
 func NewParser() *Parser {
@@ -150,9 +149,9 @@ func (p *Parser) Run(d []byte) (err error) {
 		if p.Cursor >= uint64(len(p.Parsed.Tape)) {
 			return
 		}
-		//p.Iter.AdvanceInto()
-		t := p.Iter.AdvanceInto()
-		fmt.Printf("%v %d %c\n", t, p.Cursor, p.Parsed.Tape[p.Cursor]>>56)
+		p.Iter.AdvanceInto()
+		//t := p.Iter.AdvanceInto()
+		//fmt.Printf("%v %d %c\n", t, p.Cursor, p.Parsed.Tape[p.Cursor]>>56)
 		if state, err = state(byte(p.Parsed.Tape[p.Cursor] >> 56)); err != nil {
 			return
 		}
@@ -480,6 +479,7 @@ func (p *Parser) getFacetValue(n byte) interface{} {
 	return val
 }
 
+// TODO: allow "type" definition to be anywhere in the object, not just first
 func (p *Parser) isGeo() bool {
 	if uint64(len(p.Parsed.Tape))-p.Cursor < 3 {
 		return false
@@ -533,11 +533,12 @@ func (p *Parser) getGeoValue() error {
 	// adjust both cursors to the end of this object
 	p.StringCursor += stringSize
 	p.Cursor = next
-
+	// get an iterator only containing the geo object
 	var geoIter json.Iter
 	if _, err := p.Iter.AdvanceIter(&geoIter); err != nil {
 		return err
 	}
+	// convert the geo object into json bytes
 	object, err := geoIter.MarshalJSON()
 	if err != nil {
 		return err
