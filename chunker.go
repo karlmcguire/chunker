@@ -272,7 +272,6 @@ func (p *Parser) MapFacetVal(n byte) (ParserState, error) {
 	if err := p.getFacet(n); err != nil {
 		return nil, err
 	}
-
 	// TODO: move this to a cache so we only have to grab referenced quads once
 	//       per facet map definition, rather than for each index-value
 	//
@@ -296,12 +295,19 @@ func (p *Parser) MapFacetVal(n byte) (ParserState, error) {
 }
 
 func (p *Parser) ScalarFacet(n byte) (ParserState, error) {
+	// getFacet fills the p.Facet struct
 	if err := p.getFacet(n); err != nil {
 		return nil, err
 	}
+	// because this is a scalar facet and you can reference parent quads, we
+	// first have to check if any of the quads waiting on a Level match the
+	// facet predicate
 	if p.Levels.FoundScalarFacet(p.FacetPred, p.Facet) {
 		return p.Object, nil
 	}
+	// we didn't find the predicate waiting on a Level, so go through quads
+	// in reverse order (it's most likely that the referenced quad is near
+	// the end of the p.Quads slice)
 	for i := len(p.Quads) - 1; i >= 0; i-- {
 		if p.Quads[i].Predicate == p.FacetPred {
 			p.Quads[i].Facets = append(p.Quads[i].Facets, p.Facet)
@@ -370,31 +376,6 @@ func (p *Parser) Uid(n byte) (ParserState, error) {
 	return p.Object, nil
 }
 
-func (p *Parser) getFacet(n byte) error {
-	var err error
-	var val interface{}
-	switch n {
-	case '"':
-		s := p.String()
-		t, err := types.ParseTime(s)
-		if err == nil {
-			p.Facet.ValType = api.Facet_DATETIME
-			val = t
-		} else {
-			if p.Facet, err = facets.FacetFor(p.Facet.Key, strconv.Quote(s)); err != nil {
-				return err
-			}
-			return nil
-		}
-	case 'l', 'u', 'd', 't', 'f', 'n':
-		val = p.getFacetValue(n)
-	}
-	if p.Facet, err = facets.ToBinary(p.Facet.Key, val, p.Facet.ValType); err != nil {
-		return err
-	}
-	return nil
-}
-
 // openValueLevel is used by Value when a non-scalar value is found.
 func (p *Parser) openValueLevel(closing byte, array bool, next ParserState) ParserState {
 	// peek the next node to see if it's an empty object or array
@@ -439,6 +420,31 @@ func (p *Parser) getScalarValue(n byte) {
 	}
 	p.Quads = append(p.Quads, p.Quad)
 	p.Quad = NewQuad()
+}
+
+func (p *Parser) getFacet(n byte) error {
+	var err error
+	var val interface{}
+	switch n {
+	case '"':
+		s := p.String()
+		t, err := types.ParseTime(s)
+		if err == nil {
+			p.Facet.ValType = api.Facet_DATETIME
+			val = t
+		} else {
+			if p.Facet, err = facets.FacetFor(p.Facet.Key, strconv.Quote(s)); err != nil {
+				return err
+			}
+			return nil
+		}
+	case 'l', 'u', 'd', 't', 'f', 'n':
+		val = p.getFacetValue(n)
+	}
+	if p.Facet, err = facets.ToBinary(p.Facet.Key, val, p.Facet.ValType); err != nil {
+		return err
+	}
+	return nil
 }
 
 func (p *Parser) getFacetValue(n byte) interface{} {
