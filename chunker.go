@@ -116,16 +116,15 @@ func (p *ParserLevels) FoundSubject(s string) {
 type ParserState func(byte) (ParserState, error)
 
 type Parser struct {
-	Cursor         uint64
-	StringCursor   uint64
-	SubjectCounter uint64
-	Quad           *Quad
-	Facet          *api.Facet
-	Quads          []*Quad
-	Levels         *ParserLevels
-	Parsed         *json.ParsedJson
-	FacetPred      string
-	FacetId        int
+	Cursor       uint64
+	StringCursor uint64
+	Quad         *Quad
+	Facet        *api.Facet
+	Quads        []*Quad
+	Levels       *ParserLevels
+	Parsed       *json.ParsedJson
+	FacetPred    string
+	FacetId      int
 
 	Iter json.Iter
 }
@@ -145,7 +144,6 @@ func (p *Parser) Run(d []byte) (err error) {
 		return
 	}
 	p.Iter = p.Parsed.Iter()
-	p.Iter.AdvanceInto()
 	for state := p.Root; state != nil; p.Cursor++ {
 		if p.Cursor >= uint64(len(p.Parsed.Tape)) {
 			return
@@ -353,9 +351,43 @@ func (p *Parser) Array(n byte) (ParserState, error) {
 	return p.Array, nil
 }
 
+func (p *Parser) isGeo(n byte) bool {
+	if uint64(len(p.Parsed.Tape))-p.Cursor < 3 {
+		return false
+	}
+	if byte(p.Parsed.Tape[p.Cursor+1]>>56) != '"' {
+		return false
+	}
+	if byte(p.Parsed.Tape[p.Cursor+3]>>56) != '"' {
+		return false
+	}
+	p.Cursor++
+	maybeGeoType := p.String()
+	if maybeGeoType != "type" {
+		p.Cursor -= 2
+		p.StringCursor -= uint64(len(maybeGeoType))
+		return false
+	}
+	p.Cursor++
+	maybeGeoType = p.String()
+	switch maybeGeoType {
+	case "Point", "MultiPoint":
+	case "LineString", "MultiLineString":
+	case "Polygon", "MultiPolygon":
+	case "GeometryCollection":
+	default:
+		p.Cursor -= 2
+		p.StringCursor -= uint64(len(maybeGeoType))
+		return false
+	}
+	return true
+}
+
 func (p *Parser) Value(n byte) (ParserState, error) {
 	switch n {
 	case '{':
+		if p.isGeo(n) {
+		}
 		return p.openValueLevel('}', false, p.Object), nil
 	case '[':
 		return p.openValueLevel(']', true, p.Array), nil

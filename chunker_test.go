@@ -9,24 +9,25 @@ import (
 	"github.com/dgraph-io/dgo/v2/protos/api"
 )
 
-/*
 func TestPrint(t *testing.T) {
 	p := NewParser()
-	if err := p.Run([]byte(`[{
+	if err := p.Run([]byte(`{
 		"name": "Alice",
-		"mobile": "040123456",
-		"car": "MA0123",
-		"mobile|operation": "READ WRITE",
-		"car|first": true,
-		"car|age": 3,
-		"car|price": 30000.56,
-		"car|since": "2006-01-02T15:04:05Z"
-	}]`)); err != nil {
+		"age": 26,
+		"married": true,
+		"now": "2020-12-29T17:39:34.816808024Z",
+		"address": {
+			"type": "Point",
+			"coordinates": [
+				1.1, 
+				2
+			]
+		}
+	}`)); err != nil {
 		t.Fatal(err)
 	}
 	spew.Dump(p.Quads)
 }
-*/
 
 type Case struct {
 	Json      []byte
