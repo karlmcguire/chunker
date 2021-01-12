@@ -10,7 +10,7 @@ import (
 	"github.com/dgraph-io/dgo/v2/protos/api"
 	"github.com/dgraph-io/dgraph/types"
 	"github.com/dgraph-io/dgraph/types/facets"
-	json "github.com/minio/simdjson-go"
+	"github.com/minio/simdjson-go"
 	"github.com/twpayne/go-geom"
 	"github.com/twpayne/go-geom/encoding/geojson"
 )
@@ -36,10 +36,10 @@ type Parser struct {
 	Facet        *api.Facet
 	Quads        []*Quad
 	Levels       *ParserLevels
-	Parsed       *json.ParsedJson
+	Parsed       *simdjson.ParsedJson
 	FacetPred    string
 	FacetId      int
-	Iter         json.Iter
+	Iter         simdjson.Iter
 }
 
 func NewParser() *Parser {
@@ -53,7 +53,7 @@ func NewParser() *Parser {
 }
 
 func (p *Parser) Run(d []byte) (err error) {
-	if p.Parsed, err = json.Parse(d, nil); err != nil {
+	if p.Parsed, err = simdjson.Parse(d, nil); err != nil {
 		return
 	}
 	p.Iter = p.Parsed.Iter()
@@ -446,7 +446,7 @@ func (p *Parser) getGeoValue() error {
 	p.StringCursor += stringSize
 	p.Cursor = next
 	// get an iterator only containing the geo object
-	var geoIter json.Iter
+	var geoIter simdjson.Iter
 	if _, err := p.Iter.AdvanceIter(&geoIter); err != nil {
 		return err
 	}
