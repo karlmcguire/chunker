@@ -150,9 +150,9 @@ func (p *Parser) Run(d []byte) (err error) {
 		if p.Cursor >= uint64(len(p.Parsed.Tape)) {
 			return
 		}
-		p.Iter.AdvanceInto()
-		//t := p.Iter.AdvanceInto()
-		//fmt.Printf("%v %d %c\n", t, p.Cursor, p.Parsed.Tape[p.Cursor]>>56)
+		//p.Iter.AdvanceInto()
+		t := p.Iter.AdvanceInto()
+		fmt.Printf("%v %d %c\n", t, p.Cursor, p.Parsed.Tape[p.Cursor]>>56)
 		if state, err = state(byte(p.Parsed.Tape[p.Cursor] >> 56)); err != nil {
 			return
 		}
@@ -357,9 +357,11 @@ func (p *Parser) Value(n byte) (ParserState, error) {
 	switch n {
 	case '{':
 		if p.isGeo() {
+			// TODO: add predicate to Level wait
 			if err := p.getGeoValue(); err != nil {
 				return nil, err
 			}
+			return p.Object, nil
 		}
 		return p.openValueLevel('}', false, p.Object), nil
 	case '[':
@@ -488,8 +490,10 @@ func (p *Parser) isGeo() bool {
 	if byte(p.Parsed.Tape[p.Cursor+3]>>56) != '"' {
 		return false
 	}
+	totalStringSize := uint64(0)
 	p.Cursor++
 	maybeGeoType := p.String()
+	totalStringSize += uint64(len(maybeGeoType))
 	if maybeGeoType != "type" {
 		p.Cursor -= 2
 		p.StringCursor -= uint64(len(maybeGeoType))
@@ -497,6 +501,7 @@ func (p *Parser) isGeo() bool {
 	}
 	p.Cursor++
 	maybeGeoType = p.String()
+	totalStringSize += uint64(len(maybeGeoType))
 	switch maybeGeoType {
 	case "Point", "MultiPoint":
 	case "LineString", "MultiLineString":
@@ -508,10 +513,27 @@ func (p *Parser) isGeo() bool {
 		return false
 	}
 	p.Cursor -= 4
+	p.StringCursor -= totalStringSize
 	return true
 }
 
 func (p *Parser) getGeoValue() error {
+	// skip over the geo object
+	next := uint64(((p.Parsed.Tape[p.Cursor] << 8) >> 8) - 1)
+	stringSize := uint64(0)
+	for i := p.Cursor; i < next; i++ {
+		c := byte(p.Parsed.Tape[i] >> 56)
+		if c == '"' {
+			stringSize += p.Parsed.Tape[i+1]
+		}
+		if c == '"' || c == 'l' || c == 'u' || c == 'd' {
+			i++
+		}
+	}
+	// adjust both cursors to the end of this object
+	p.StringCursor += stringSize
+	p.Cursor = next
+
 	var geoIter json.Iter
 	if _, err := p.Iter.AdvanceIter(&geoIter); err != nil {
 		return err

@@ -22,7 +22,8 @@ func TestPrint(t *testing.T) {
 				1.1, 
 				2
 			]
-		}
+		},
+		"something": "else"
 	}`)); err != nil {
 		t.Fatal(err)
 	}
